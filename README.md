@@ -18,7 +18,6 @@ Next.js 15 (App Router) + TypeScript + Prisma + Auth.js v5 + sharp + S3 兼容�
 ```bash
 npm install          # 自动生成 Prisma 客户端（SQLite schema）
 npm run db:push      # 建表（SQLite）
-npm run db:seed      # 演示数据：admin / alice / bob，密码均为 Abc12345
 npm run dev          # http://localhost:3000
 ```
 
