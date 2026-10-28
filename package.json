@@ -25,7 +25,6 @@
     "blurhash": "^2.0.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "ioredis": "^5.4.1",
     "lucide-react": "^0.460.0",
     "next": "^15.1.6",
     "next-auth": "^5.0.0-beta.25",

@@ -1,9 +1,9 @@
 name: Build & Push Docker Image
 
-# 推送到 main 时自动构建镜像并发布到 ghcr.io
+# 推送到 main 或 final-review 时自动构建镜像并发布到 ghcr.io
 on:
   push:
-    branches: [main]
+    branches: [main, final-review]
 
 jobs:
   build:
@@ -27,7 +27,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            latest
+            type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-
 
       - uses: docker/build-push-action@v6

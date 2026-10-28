@@ -20,7 +20,8 @@ RUN npx prisma generate --schema prisma/schema.prisma
 # 构建环境无 .env，注入占位 DATABASE_URL 仅供 Prisma 客户端校验通过（构建期不实际连库）
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+# 注意：不要用 npm run build，其中的 dev schema generate 会覆盖上面的 postgres 客户端
+RUN npx next build
 
 # ---------- runner ----------
 FROM base AS runner
