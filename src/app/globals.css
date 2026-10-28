@@ -1,0 +1,198 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: 40 20% 97%;
+  --foreground: 0 0% 9%;
+  --card: 40 14% 99%;
+  --card-foreground: 0 0% 9%;
+  --popover: 40 14% 99%;
+  --popover-foreground: 0 0% 9%;
+  --primary: 0 0% 9%;
+  --primary-foreground: 40 20% 97%;
+  --secondary: 40 12% 93%;
+  --secondary-foreground: 0 0% 9%;
+  --muted: 40 12% 93%;
+  --muted-foreground: 0 0% 42%;
+  --accent: 40 12% 93%;
+  --accent-foreground: 0 0% 9%;
+  /* 印泥朱砂红：危险操作 + 印章点睛 */
+  --destructive: 4 62% 44%;
+  --destructive-foreground: 40 20% 97%;
+  --seal: 4 62% 44%;
+  --seal-foreground: 40 20% 97%;
+  --border: 40 8% 88%;
+  --input: 40 8% 88%;
+  --ring: 0 0% 9%;
+  --radius: 0.625rem;
+  --font-display: "Noto Serif SC", "Source Han Serif SC", "Songti SC", STSong, SimSun, serif;
+}
+
+.dark {
+  --background: 0 0% 6%;
+  --foreground: 40 10% 95%;
+  --card: 0 0% 9%;
+  --card-foreground: 40 10% 95%;
+  --popover: 0 0% 9%;
+  --popover-foreground: 40 10% 95%;
+  --primary: 40 10% 95%;
+  --primary-foreground: 0 0% 9%;
+  --secondary: 0 0% 14%;
+  --secondary-foreground: 40 10% 95%;
+  --muted: 0 0% 14%;
+  --muted-foreground: 0 0% 65%;
+  --accent: 0 0% 14%;
+  --accent-foreground: 40 10% 95%;
+  --destructive: 4 68% 58%;
+  --destructive-foreground: 0 0% 9%;
+  --seal: 4 68% 58%;
+  --seal-foreground: 0 0% 9%;
+  --border: 0 0% 20%;
+  --input: 0 0% 20%;
+  --ring: 40 10% 90%;
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-seal: hsl(var(--seal));
+  --color-seal-foreground: hsl(var(--seal-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+/* 展示字体：标题用宋体系，呼应水墨卷轴气质（纯系统字体，无外部请求） */
+h1,
+h2,
+.font-display {
+  font-family: var(--font-display);
+}
+
+/* 选区与滚动条 */
+::selection {
+  background: hsl(var(--seal) / 0.22);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--foreground) / 0.22) transparent;
+}
+
+/* ===== 动效 ===== */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+/* 居中定位弹窗专用：缩放时保留 -50%,-50% 位移 */
+@keyframes zoom-in-centered {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@utility anim-fade-up {
+  animation: fade-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@utility anim-fade-in {
+  animation: fade-in 0.25s ease-out both;
+}
+@utility anim-zoom-in {
+  animation: zoom-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@utility anim-zoom-in-centered {
+  animation: zoom-in-centered 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade-up,
+  .anim-fade-in,
+  .anim-zoom-in,
+  .anim-zoom-in-centered {
+    animation: none;
+  }
+}
+
+/* 页面主体轻入场 */
+main {
+  animation: fade-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  main {
+    animation: none;
+  }
+}
+
+/* 瀑布流：CSS columns 实现 */
+.masonry {
+  column-count: 2;
+  column-gap: 0.75rem;
+}
+@media (min-width: 640px) {
+  .masonry { column-count: 3; }
+}
+@media (min-width: 1024px) {
+  .masonry { column-count: 4; }
+}
+@media (min-width: 1536px) {
+  .masonry { column-count: 6; }
+}
+.masonry > * {
+  break-inside: avoid;
+  margin-bottom: 0.75rem;
+}

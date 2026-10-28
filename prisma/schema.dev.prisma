@@ -1,0 +1,148 @@
+// 本地开发 schema（SQLite，无需 Docker）
+// 与 schema.prisma（PostgreSQL）保持模型一致
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  name          String    @unique
+  avatarUrl     String?
+  role          String    @default("USER") // USER | ADMIN
+  storageQuota  BigInt    @default(5368709120) // 默认 5GB
+  storageUsed   BigInt    @default(0)
+  status        String    @default("ACTIVE") // ACTIVE | BANNED
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+
+  images    Image[]
+  albums    Album[]
+  tags      Tag[]
+  apiTokens ApiToken[]
+  tokens    Token[]
+}
+
+model Image {
+  id         String    @id @default(cuid())
+  userId     String
+  filename   String
+  storageKey String
+  thumbKey   String
+  mimeType   String
+  size       Int
+  width      Int
+  height     Int
+  sha256     String
+  blurhash   String?
+  visibility String    @default("PUBLIC") // PUBLIC | PRIVATE | UNLISTED
+  albumId    String?
+  deletedAt  DateTime? // 软删除，回收站保留 30 天
+  createdAt  DateTime  @default(now())
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  album    Album?     @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  tags     ImageTag[]
+
+  @@index([userId, createdAt])
+  @@index([sha256])
+  @@index([visibility, createdAt])
+  @@index([albumId])
+}
+
+model Album {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  description  String?
+  slug         String
+  coverImageId String?
+  visibility   String   @default("PUBLIC")
+  createdAt    DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images Image[]
+
+  @@unique([userId, slug])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  createdAt DateTime @default(now())
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  imageTag ImageTag[]
+
+  @@unique([userId, name])
+}
+
+model ImageTag {
+  imageId String
+  tagId   String
+
+  image Image @relation(fields: [imageId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([imageId, tagId])
+}
+
+model ApiToken {
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  tokenHash  String    @unique
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Token {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String // EMAIL_VERIFY | PASSWORD_RESET
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Setting {
+  key   String @id
+  value String
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+}

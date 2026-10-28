@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+
+# next
+.next/
+out/
+
+# env & secrets
+.env
+.env*.local
+
+# database & storage (本地开发)
+prisma/dev.db
+prisma/dev.db-journal
+storage/
+
+# misc
+*.log
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts

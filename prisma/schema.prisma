@@ -1,0 +1,152 @@
+// 生产环境 schema（PostgreSQL，Docker 部署使用）
+// 注意：为兼容 SQLite 开发预览，状态字段统一使用 String + 应用层校验，而非 Prisma enum
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  name          String    @unique // 用户名，用于 /u/[username] 主页
+  avatarUrl     String?
+  role          String    @default("USER") // USER | ADMIN
+  storageQuota  BigInt    @default(5368709120) // 默认 5GB
+  storageUsed   BigInt    @default(0)
+  status        String    @default("ACTIVE") // ACTIVE | BANNED
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+
+  images    Image[]
+  albums    Album[]
+  tags      Tag[]
+  apiTokens ApiToken[]
+  tokens    Token[]
+}
+
+model Image {
+  id         String    @id @default(cuid())
+  userId     String
+  filename   String
+  storageKey String
+  thumbKey   String
+  mimeType   String
+  size       Int
+  width      Int
+  height     Int
+  sha256     String
+  blurhash   String?
+  visibility String    @default("PUBLIC") // PUBLIC | PRIVATE | UNLISTED（均仅登录用户可达）
+  albumId    String?
+  deletedAt  DateTime? // 软删除，回收站保留 30 天
+  createdAt  DateTime  @default(now())
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  album    Album?     @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  tags     ImageTag[]
+
+  @@index([userId, createdAt])
+  @@index([sha256])
+  @@index([visibility, createdAt])
+  @@index([albumId])
+}
+
+model Album {
+  id           String   @id @default(cuid())
+  userId       String
+  name         String
+  description  String?
+  slug         String
+  coverImageId String?
+  visibility   String   @default("PUBLIC")
+  createdAt    DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images Image[]
+
+  @@unique([userId, slug])
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  createdAt DateTime @default(now())
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  imageTag ImageTag[]
+
+  @@unique([userId, name])
+}
+
+model ImageTag {
+  imageId String
+  tagId   String
+
+  image Image @relation(fields: [imageId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([imageId, tagId])
+}
+
+model ApiToken {
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  tokenHash  String    @unique // sha256(token)，明文只在创建时返回一次
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// 邮箱验证 / 找回密码 令牌
+model Token {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String // EMAIL_VERIFY | PASSWORD_RESET
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// 站点设置（键值对）
+model Setting {
+  key   String @id
+  value String
+}
+
+// 预留：未来接入 OAuth（数据库会话）时启用
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+
+  @@unique([provider, providerAccountId])
+}
+
+// 预留：未来接入 OAuth（数据库会话）时启用
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+}
