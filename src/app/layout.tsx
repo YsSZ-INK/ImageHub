@@ -3,6 +3,9 @@ import { Toaster } from "sonner";
 import { getSettings } from "@/lib/settings";
 import "./globals.css";
 
+// 全站需登录，禁止构建期静态预渲染（避免构建环境访问数据库）
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata(): Promise<Metadata> {
   const settings = await getSettings();
   // 全站需登录，不做公开 SEO，仅保留站点级基础元数据

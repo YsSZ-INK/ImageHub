@@ -17,6 +17,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # 生产使用 PostgreSQL schema 生成客户端
 RUN npx prisma generate --schema prisma/schema.prisma
+# 构建环境无 .env，注入占位 DATABASE_URL 仅供 Prisma 客户端校验通过（构建期不实际连库）
+ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
