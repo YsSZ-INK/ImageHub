@@ -1,6 +1,5 @@
-# Docker Compose：最小部署 = postgres + web（本地磁盘存储）
-# 可选扩展：--profile s3 启用 MinIO 对象存储；--profile redis 启用 Redis 限流
-# 最小部署下限流降级为进程内存实现，单实例场景足够
+# Docker Compose：web + postgres（本地磁盘存储）
+# 可选扩展：--profile redis 启用 Redis（默认内存限流，单实例足够）
 services:
   postgres:
     image: postgres:16-alpine
@@ -16,39 +15,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
-  # ---- 可选：MinIO 对象存储（docker compose --profile s3 up -d） ----
-  minio:
-    image: minio/minio:latest
-    profiles: ["s3"]
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin-change-me
-    ports:
-      - "9000:9000" # S3 API
-      - "9001:9001" # 控制台（仅管理用途，生产建议关闭）
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  # 初始化 MinIO 桶（私有，不设公开读策略）
-  minio-init:
-    image: minio/mc:latest
-    profiles: ["s3"]
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin-change-me &&
-      mc mb --ignore-existing local/imagehub &&
-      echo 'MinIO 桶 imagehub 已创建（默认私有，无公开读策略）'"
 
   # ---- 可选：Redis（docker compose --profile redis up -d） ----
   redis:
@@ -86,15 +52,7 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:-please-change-me-32chars-minimum}
       AUTH_TRUST_HOST: "true"
       DATABASE_URL: postgresql://imagehub:imagehub-pass-change-me@postgres:5432/imagehub
-      # 默认本地磁盘存储；启用 MinIO 时在 .env 设 STORAGE_DRIVER=s3
-      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
       LOCAL_STORAGE_DIR: /app/storage
-      # 仅 STORAGE_DRIVER=s3 时生效
-      S3_ENDPOINT: http://minio:9000
-      S3_REGION: us-east-1
-      S3_BUCKET: imagehub
-      S3_ACCESS_KEY_ID: minioadmin
-      S3_SECRET_ACCESS_KEY: minioadmin-change-me
       MAX_UPLOAD_MB: "20"
       CONVERT_TO_WEBP: "false"
       # 留空时限流降级为进程内存实现；启用 Redis 时在 .env 设 REDIS_URL
@@ -103,5 +61,4 @@ services:
 volumes:
   postgres_data:
   storage_data:
-  minio_data:
   redis_data:
