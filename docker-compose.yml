@@ -1,5 +1,6 @@
-# Docker Compose：web + postgres + minio + redis
-# MinIO 桶默认私有 —— 符合"严格私有、禁止公开读"的要求
+# Docker Compose：最小部署 = postgres + web（本地磁盘存储）
+# 可选扩展：--profile s3 启用 MinIO 对象存储；--profile redis 启用 Redis 限流
+# 最小部署下限流降级为进程内存实现，单实例场景足够
 services:
   postgres:
     image: postgres:16-alpine
@@ -16,8 +17,10 @@ services:
       timeout: 5s
       retries: 10
 
+  # ---- 可选：MinIO 对象存储（docker compose --profile s3 up -d） ----
   minio:
     image: minio/minio:latest
+    profiles: ["s3"]
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -37,6 +40,7 @@ services:
   # 初始化 MinIO 桶（私有，不设公开读策略）
   minio-init:
     image: minio/mc:latest
+    profiles: ["s3"]
     depends_on:
       minio:
         condition: service_healthy
@@ -46,8 +50,10 @@ services:
       mc mb --ignore-existing local/imagehub &&
       echo 'MinIO 桶 imagehub 已创建（默认私有，无公开读策略）'"
 
+  # ---- 可选：Redis（docker compose --profile redis up -d） ----
   redis:
     image: redis:7-alpine
+    profiles: ["redis"]
     restart: unless-stopped
     volumes:
       - redis_data:/data
@@ -65,12 +71,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     ports:
       - "3000:3000"
+    volumes:
+      - storage_data:/app/storage
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
       interval: 15s
@@ -82,7 +86,10 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:-please-change-me-32chars-minimum}
       AUTH_TRUST_HOST: "true"
       DATABASE_URL: postgresql://imagehub:imagehub-pass-change-me@postgres:5432/imagehub
-      STORAGE_DRIVER: s3
+      # 默认本地磁盘存储；启用 MinIO 时在 .env 设 STORAGE_DRIVER=s3
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
+      LOCAL_STORAGE_DIR: /app/storage
+      # 仅 STORAGE_DRIVER=s3 时生效
       S3_ENDPOINT: http://minio:9000
       S3_REGION: us-east-1
       S3_BUCKET: imagehub
@@ -90,9 +97,11 @@ services:
       S3_SECRET_ACCESS_KEY: minioadmin-change-me
       MAX_UPLOAD_MB: "20"
       CONVERT_TO_WEBP: "false"
-      REDIS_URL: redis://redis:6379
+      # 留空时限流降级为进程内存实现；启用 Redis 时在 .env 设 REDIS_URL
+      REDIS_URL: ${REDIS_URL:-}
 
 volumes:
   postgres_data:
+  storage_data:
   minio_data:
   redis_data:
