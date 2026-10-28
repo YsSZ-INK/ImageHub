@@ -32,11 +32,13 @@ RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
-# Prisma 引擎与 CLI（migrate deploy 用）
+# Prisma 客户端与引擎（应用运行时用）
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=build /app/node_modules/prisma ./node_modules/prisma
 COPY --from=build /app/prisma ./prisma
+
+# 全局安装 prisma CLI（npm 自动带全依赖闭包），供启动前执行数据库迁移
+RUN npm install -g prisma@6.19.3 --no-audit --no-fund
 
 USER nextjs
 EXPOSE 3000
@@ -44,4 +46,4 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
 # 启动前执行数据库迁移
-CMD ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma && node server.js"]
+CMD ["sh", "-c", "prisma migrate deploy --schema prisma/schema.prisma && node server.js"]
