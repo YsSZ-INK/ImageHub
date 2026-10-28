@@ -31,7 +31,7 @@ services:
 
   web:
     # 优先使用 ghcr.io 上的成品镜像（GitHub Actions 自动构建）；本地无镜像时用 build 构建
-    image: ghcr.io/yszz-ink/imagehub:latest
+    image: ghcr.io/yssz-ink/imagehub:latest
     build: .
     restart: unless-stopped
     depends_on:

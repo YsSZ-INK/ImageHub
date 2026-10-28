@@ -122,8 +122,8 @@ npm run dev          # http://localhost:3000
 推送到 `main` 分支后，GitHub Actions 自动执行 Docker 多阶段构建（deps → build → runner），镜像发布为：
 
 ```
-ghcr.io/yszz-ink/imagehub:latest
-ghcr.io/yszz-ink/imagehub:sha-<commit>
+ghcr.io/yssz-ink/imagehub:latest
+ghcr.io/yssz-ink/imagehub:sha-<commit>
 ```
 
 服务器上 `docker compose pull web && docker compose up -d` 即完成升级。
