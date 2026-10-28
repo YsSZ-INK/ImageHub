@@ -19,8 +19,3 @@ export function getStorage(): Promise<Storage> {
   cached ??= import("./local").then((m) => new m.LocalStorage());
   return cached;
 }
-
-// 测试/运行时可重置（仅服务端使用）
-export function resetStorageCache() {
-  cached = null;
-}
