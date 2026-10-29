@@ -33,6 +33,8 @@ RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+# standalone 输出不含 public（水墨背景图等静态资源），必须显式拷贝
+COPY --from=build /app/public ./public
 # Prisma 客户端与引擎（应用运行时用）
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma
