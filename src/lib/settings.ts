@@ -9,7 +9,7 @@ export type SiteSettings = {
 const DEFAULTS: SiteSettings = {
   siteName: "ImageHub",
   allowRegister: true,
-  maxUploadMB: 20,
+  maxUploadMB: 50,
 };
 
 let cache: { value: SiteSettings; expiresAt: number } | null = null;
@@ -43,5 +43,5 @@ export async function saveSettings(patch: Partial<SiteSettings>) {
 
 // 上传大小上限：站点设置优先，环境变量兜底
 export function envMaxUploadMB(): number {
-  return Number(process.env.MAX_UPLOAD_MB ?? 20);
+  return Number(process.env.MAX_UPLOAD_MB ?? 50);
 }

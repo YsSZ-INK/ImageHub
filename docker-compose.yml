@@ -53,7 +53,7 @@ services:
       AUTH_TRUST_HOST: "true"
       DATABASE_URL: postgresql://imagehub:imagehub-pass-change-me@postgres:5432/imagehub
       LOCAL_STORAGE_DIR: /app/storage
-      MAX_UPLOAD_MB: "20"
+      MAX_UPLOAD_MB: "50"
       CONVERT_TO_WEBP: "false"
       # 留空时限流降级为进程内存实现；启用 Redis 时在 .env 设 REDIS_URL
       REDIS_URL: ${REDIS_URL:-}

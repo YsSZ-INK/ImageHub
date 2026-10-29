@@ -117,7 +117,7 @@ docker compose --profile redis up -d
 | `AUTH_SECRET` | ✅ | 会话加密密钥，`openssl rand -base64 32` 生成，≥32 字符 |
 | `DATABASE_URL` | ✅ | 本地开发 `file:./dev.db`；Docker 部署由 compose 注入 PostgreSQL |
 | `LOCAL_STORAGE_DIR` | - | 本地存储目录，容器内为 `/app/storage`，默认 `./storage` |
-| `MAX_UPLOAD_MB` | - | 单文件大小上限（MB），默认 20 |
+| `MAX_UPLOAD_MB` | - | 单文件大小上限（MB），默认 50 |
 | `CONVERT_TO_WEBP` | - | 是否自动将 jpg/png 转 WebP，默认 false |
 | `REDIS_URL` | - | 可选，配置后限流走 Redis，否则降级为进程内存实现 |
 | `SMTP_URL` / `RESEND_API_KEY` | - | 可选，接入邮件服务后验证 / 重置邮件改为真实发送 |
@@ -245,7 +245,7 @@ docker compose up -d
 镜像内 Prisma 客户端与 schema 不匹配。确认构建流程先生成 PostgreSQL 客户端（`npx prisma generate --schema prisma/schema.prisma`）再 `next build`。
 
 **上传失败提示超限**
-检查反代的请求体大小限制（Nginx `client_max_body_size` / Caddy `request_body.max_size`）大于 `MAX_UPLOAD_MB`；同时确认文件不超过该上限。
+检查反代的请求体大小限制（Nginx `client_max_body_size` / Caddy `request_body.max_size`）大于 `MAX_UPLOAD_MB`（默认 50，如 Nginx 需 `client_max_body_size 64m;`）；同时确认文件不超过该上限。
 
 ## License
 
