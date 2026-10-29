@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown } from "lucide-react";
+import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { ImageGrid, EmptyState } from "@/components/image-grid";
+import { Lightbox } from "@/components/lightbox";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { VisibilityBadge } from "@/components/image-actions";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -18,32 +19,56 @@ import type { ImageDTO } from "@/server/image.service";
 export function MyImagesClient({ albums }: { albums: { id: string; name: string }[] }) {
   const router = useRouter();
   const [items, setItems] = useState<ImageDTO[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageCursors, setPageCursors] = useState<(string | null)[]>([null]);
+  const [hasNext, setHasNext] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batching, setBatching] = useState(false);
   const [dialog, setDialog] = useState<"album" | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [albumId, setAlbumId] = useState("");
+  // 灯箱预览：当前页内索引
+  const [preview, setPreview] = useState<number | null>(null);
 
-  const load = useCallback(async (reset: boolean) => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ scope: "mine" });
-      if (!reset && cursor) params.set("cursor", cursor);
-      const res = await fetch(`/api/images?${params}`);
-      const json = await res.json();
-      if (json.ok) {
-        setItems((prev) => (reset ? json.data.items : [...prev, ...json.data.items]));
-        setCursor(json.data.nextCursor);
+  // 翻页：游标栈（pageCursors[i] = 请求第 i+1 页所需的 cursor）
+  const loadPage = useCallback(
+    async (target: number) => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({ scope: "mine" });
+        const c = pageCursors[target - 1];
+        if (c) params.set("cursor", c);
+        const res = await fetch(`/api/images?${params}`);
+        const json = await res.json();
+        if (json.ok) {
+          // 当前页被删空且不是第一页时，回退一页
+          if (json.data.items.length === 0 && target > 1) {
+            setPageCursors((prev) => prev.slice(0, target));
+            setLoading(false);
+            return loadPage(target - 1);
+          }
+          setItems(json.data.items);
+          setPage(target);
+          setHasNext(!!json.data.nextCursor);
+          if (json.data.nextCursor) {
+            setPageCursors((prev) => {
+              const next = [...prev];
+              next[target] = json.data.nextCursor;
+              return next;
+            });
+          }
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
-    }
-  }, [cursor]);
+    },
+    [pageCursors]
+  );
 
   useEffect(() => {
-    load(true);
+    loadPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -71,7 +96,7 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
         setSelected(new Set());
         setDialog(null);
         router.refresh();
-        load(true);
+        loadPage(page);
       } else toast.error(json.error);
     } finally {
       setBatching(false);
@@ -110,10 +135,18 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
               <label className="flex cursor-pointer items-center gap-2">
                 <input
                   type="checkbox"
-                  checked={selected.size > 0 && selected.size === items.length}
-                  onChange={(e) => setSelected(e.target.checked ? new Set(items.map((i) => i.id)) : new Set())}
+                  checked={items.length > 0 && items.every((i) => selected.has(i.id))}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSelected(new Set([...selected, ...items.map((i) => i.id)]));
+                    } else {
+                      const next = new Set(selected);
+                      items.forEach((i) => next.delete(i.id));
+                      setSelected(next);
+                    }
+                  }}
                 />
-                全选
+                全选本页
               </label>
               {/* 批量操作栏：常驻显示，未选中时禁用操作 */}
               <div className="flex flex-wrap items-center gap-2">
@@ -156,7 +189,7 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
 
           {/* 带复选框的网格 */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8">
-            {items.map((img) => (
+            {items.map((img, idx) => (
               <div key={img.id} className="group relative overflow-hidden rounded-lg border border-border">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -166,6 +199,19 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
                   className="aspect-square w-full cursor-pointer bg-muted object-cover"
                   onClick={() => toggle(img.id)}
                 />
+                {/* 正中放大按钮：点击放大查看，不触发选中 */}
+                <button
+                  type="button"
+                  aria-label="放大查看"
+                  title="放大查看"
+                  className="absolute inset-0 m-auto flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-black/80 group-hover:opacity-100"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPreview(idx);
+                  }}
+                >
+                  <ZoomIn className="h-5 w-5" />
+                </button>
                 <label className="absolute left-2 top-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -196,13 +242,16 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
             ))}
           </div>
 
-          {cursor && (
-            <div className="flex justify-center py-4">
-              <Button variant="outline" onClick={() => load(false)} disabled={loading}>
-                {loading ? <Loader2 className="animate-spin" /> : null} 加载更多
-              </Button>
-            </div>
-          )}
+          {/* 翻页 */}
+          <div className="flex items-center justify-center gap-3 py-4">
+            <Button variant="outline" size="sm" disabled={loading || page === 1} onClick={() => loadPage(page - 1)}>
+              上一页
+            </Button>
+            <span className="min-w-16 text-center text-sm text-muted-foreground">第 {page} 页</span>
+            <Button variant="outline" size="sm" disabled={loading || !hasNext} onClick={() => loadPage(page + 1)}>
+              下一页
+            </Button>
+          </div>
         </>
       )}
 
@@ -212,7 +261,7 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
           <DialogHeader>
             <DialogTitle>上传图片</DialogTitle>
           </DialogHeader>
-          <UploadDropzone onSettled={() => load(true)} />
+          <UploadDropzone onSettled={() => loadPage(1)} />
         </DialogContent>
       </Dialog>
 
@@ -246,6 +295,10 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
           </div>
         </DialogContent>
       </Dialog>
+      {/* 灯箱放大查看（当前页内可左右切换，ESC 关闭） */}
+      {preview !== null && (
+        <Lightbox images={items} index={preview} onClose={() => setPreview(null)} onNavigate={setPreview} />
+      )}
     </div>
   );
 }
