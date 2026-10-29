@@ -75,6 +75,20 @@ download 接口始终需要登录，不生成匿名直链 / 签名 URL。
 
 只需 `postgres` + `web` 两个容器，web 镜像由 GitHub Actions 自动构建并发布到 GHCR，**无需在服务器上构建**。
 
+### 一键安装
+
+在服务器上执行一条命令（自动安装 Docker、生成随机密钥、拉取镜像并启动）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/YsSZ-INK/ImageHub/main/install.sh | bash
+```
+
+- 非交互执行：站点地址自动取 `http://服务器公网IP:3000`，`AUTH_SECRET` 与数据库密码均随机生成
+- 需要自定义时先预设变量：`SITE_URL=https://img.example.com PORT=8080 bash install.sh`
+- 重复执行安全：已有 `.env` 时沿用现有配置，不会覆盖密钥
+
+### 手动部署（等价步骤）
+
 ```bash
 # 1. 拉取代码
 git clone https://github.com/YsSZ-INK/ImageHub.git && cd ImageHub
@@ -96,7 +110,7 @@ curl http://localhost:3000/api/health   # {"ok":true,"db":"up"}
 ### 升级版本
 
 ```bash
-git pull && docker compose pull web && docker compose up -d
+cd ~/ImageHub && docker compose pull web && docker compose up -d
 ```
 
 ### 可选：启用 Redis
@@ -197,16 +211,19 @@ docker compose exec postgres psql -U imagehub -d imagehub \
 
 ## 一键卸载
 
-在项目目录执行，彻底移除容器、数据卷、镜像与项目文件：
+在项目目录执行一条命令，停止并删除容器、数据卷、镜像与项目文件：
 
 ```bash
-docker compose down -v                                  # 停止并删除容器 + 数据卷（数据库、图片存储，不可恢复）
-docker image rm ghcr.io/yssz-ink/imagehub:latest        # 删除应用镜像
-docker image rm postgres:16-alpine                      # 删除数据库镜像（可选）
-rm -rf ~/imagehub                                       # 删除项目目录（含 .env 与 docker-compose.yml）
+cd ~/ImageHub && docker compose down -v --rmi all; rm -rf ~/ImageHub
 ```
 
-> `down -v` 会永久删除 `imagehub_postgres_data`（用户与图片元数据）和 `imagehub_storage_data`（图片文件），如需保留数据请先按上文方式备份。
+说明：
+
+- `down -v`：停止并删除容器，同时删除 `imagehub_postgres_data`（用户与图片元数据）和 `imagehub_storage_data`（图片文件），**不可恢复**
+- `--rmi all`：顺带删除本 compose 拉取的镜像（应用镜像、postgres、redis；如其他项目共用同一镜像会被一并删除）
+- `rm -rf`：删除项目目录（含 `.env` 与 `docker-compose.yml`）
+
+> 如需保留数据，卸载前先按「数据持久化与备份」章节备份两个数据卷。
 
 ## 本地开发（无需 Docker）
 

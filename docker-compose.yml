@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: imagehub
-      POSTGRES_PASSWORD: imagehub-pass-change-me
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-imagehub-pass-change-me}
       POSTGRES_DB: imagehub
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -38,7 +38,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
     volumes:
       - storage_data:/app/storage
     healthcheck:
@@ -51,7 +51,7 @@ services:
       SITE_URL: ${SITE_URL:-http://localhost:3000}
       AUTH_SECRET: ${AUTH_SECRET:-please-change-me-32chars-minimum}
       AUTH_TRUST_HOST: "true"
-      DATABASE_URL: postgresql://imagehub:imagehub-pass-change-me@postgres:5432/imagehub
+      DATABASE_URL: postgresql://imagehub:${POSTGRES_PASSWORD:-imagehub-pass-change-me}@postgres:5432/imagehub
       LOCAL_STORAGE_DIR: /app/storage
       MAX_UPLOAD_MB: "50"
       CONVERT_TO_WEBP: "false"
