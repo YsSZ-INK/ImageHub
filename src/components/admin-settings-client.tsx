@@ -17,6 +17,7 @@ export function AdminSettingsClient() {
   const [maxMbInput, setMaxMbInput] = useState("");
   const [portInput, setPortInput] = useState("");
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     fetch("/api/admin/settings")
@@ -56,6 +57,19 @@ export function AdminSettingsClient() {
     }
   }
 
+  // 发送测试邮件：按已保存的 SMTP 配置真实发一封到当前管理员邮箱
+  async function sendTestMail() {
+    setTesting(true);
+    try {
+      const res = await fetch("/api/admin/settings/test-mail", { method: "POST" });
+      const json = await res.json();
+      if (json.ok) toast.success(json.data.message);
+      else toast.error(json.error);
+    } finally {
+      setTesting(false);
+    }
+  }
+
   if (!form) {
     return (
       <div className="flex justify-center py-10">
@@ -65,8 +79,10 @@ export function AdminSettingsClient() {
   }
 
   return (
-    <div className="max-w-md space-y-4">
+    <div className="max-w-5xl space-y-5">
       <h1 className="text-xl font-bold">站点设置</h1>
+      {/* 卡片按宽度自适应排列：窄屏单列，宽屏两列并排（items-start 防止等高拉伸） */}
+      <div className="grid items-start gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader>
           <CardTitle className="text-base">常规</CardTitle>
@@ -163,11 +179,18 @@ export function AdminSettingsClient() {
               onChange={(e) => setForm({ ...form, smtpFrom: e.target.value })}
             />
           </div>
-          <Button onClick={save} disabled={saving}>
-            {saving ? <Loader2 className="animate-spin" /> : null} 保存配置
-          </Button>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Button onClick={save} disabled={saving}>
+              {saving ? <Loader2 className="animate-spin" /> : null} 保存配置
+            </Button>
+            <Button variant="outline" onClick={sendTestMail} disabled={testing}>
+              {testing ? <Loader2 className="animate-spin" /> : null} 发送测试邮件
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">测试邮件发送至当前管理员邮箱，需先保存配置。</p>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }
