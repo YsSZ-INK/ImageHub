@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { UploadCloud, LinkIcon, X, Loader2, CheckCircle2, XCircle, Tags } from "lucide-react";
@@ -17,7 +17,8 @@ type UploadState = {
 };
 
 // 上传组件：拖拽 / 点击选择 / 剪贴板粘贴 / URL 远程抓取；多文件并发 + 进度条 + 失败重试
-export function UploadDropzone() {
+// onSettled：本批上传全部结束（成功或失败）时触发一次，用于刷新外部列表
+export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -26,6 +27,16 @@ export function UploadDropzone() {
   const [fetching, setFetching] = useState(false);
   // 上传时自定义标签（对所有本次上传的图片生效）
   const [tagsInput, setTagsInput] = useState("");
+
+  const allSettled = items.length > 0 && items.every((i) => i.status === "done" || i.status === "error");
+  const prevSettled = useRef(false);
+  useEffect(() => {
+    if (allSettled && !prevSettled.current) {
+      prevSettled.current = true;
+      onSettled?.();
+    }
+    if (!allSettled) prevSettled.current = false;
+  }, [allSettled, onSettled]);
 
   const startUpload = useCallback(
     (file: File): UploadState => ({ file, name: file.name, progress: 0, status: "uploading" }),

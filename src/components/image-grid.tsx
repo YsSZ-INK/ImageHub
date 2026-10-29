@@ -73,7 +73,7 @@ export function ImageGrid({
 
   return (
     <>
-      {layout === "waterfall" ? <div className="masonry">{items.map(card)}</div> : <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">{items.map(card)}</div>}
+      {layout === "waterfall" ? <div className="masonry">{items.map(card)}</div> : <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8">{items.map(card)}</div>}
       {lightbox !== null && visible.length > 0 && (
         <Lightbox
           images={items}
@@ -109,7 +109,7 @@ export function EmptyState({
 
 export function GridSkeleton({ count = 12 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8">
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className="aspect-square animate-pulse rounded-lg bg-muted" />
       ))}

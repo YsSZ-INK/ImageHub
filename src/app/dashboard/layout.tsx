@@ -7,8 +7,7 @@ import { InkBackdrop, InkSeal } from "@/components/ink-theme";
 
 // icon 为字符串名，由 SideNav 客户端组件映射（图标组件不能跨 RSC 边界传递）
 const NAV = [
-  { href: "/dashboard", label: "我的图片", icon: "layout" },
-  { href: "/dashboard/upload", label: "上传图片", icon: "upload" },
+  { href: "/dashboard", label: "我的图片", icon: "upload" },
   { href: "/dashboard/albums", label: "相册管理", icon: "folder" },
   { href: "/dashboard/trash", label: "回收站", icon: "trash" },
   { href: "/dashboard/settings", label: "个人中心", icon: "settings" },
@@ -22,7 +21,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <>
       <InkBackdrop />
       <SiteHeader siteName={settings.siteName} user={{ name: user.name, role: user.role, avatarUrl: user.avatarUrl }} />
-      <div className="mx-auto flex max-w-7xl gap-8 p-4 md:px-8 md:py-8">
+      <div className="mx-auto flex max-w-7xl gap-8 p-4 md:px-8 md:py-8 xl:max-w-screen-2xl">
         <aside className="hidden w-56 shrink-0 md:block">
           <div className="sticky top-20 flex max-h-[calc(100vh-6rem)] flex-col overflow-y-auto rounded-2xl border border-foreground/10 bg-background/55 p-3 backdrop-blur-md">
             {/* 侧栏头部：印章 + 区块标识 */}
@@ -41,7 +40,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
             </div>
           </div>
         </aside>
-        <main className="min-w-0 flex-1">{children}</main>
+        <main className="min-w-0 flex-1">
+          {/* 小屏导航：横向滚动条（桌面端显示侧栏） */}
+          <div className="mb-4 rounded-xl border border-foreground/10 bg-background/55 p-2 backdrop-blur-md md:hidden">
+            <SideNav items={NAV} horizontal />
+          </div>
+          {children}
+        </main>
       </div>
     </>
   );

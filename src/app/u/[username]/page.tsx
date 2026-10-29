@@ -28,7 +28,7 @@ export default async function UserPage({
     return (
       <>
         <SiteHeader siteName={settings.siteName} user={{ name: viewer.name, role: viewer.role, avatarUrl: viewer.avatarUrl }} />
-        <main className="mx-auto max-w-7xl space-y-6 p-4">
+        <main className="mx-auto max-w-7xl space-y-6 p-4 xl:max-w-screen-2xl">
           <h1 className="text-xl font-bold">
             {username} 的公开图片
             <span className="ml-2 text-sm font-normal text-muted-foreground">{items.length} 张已加载</span>

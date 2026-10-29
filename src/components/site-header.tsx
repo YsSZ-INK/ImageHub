@@ -31,7 +31,7 @@ export function SiteHeader({ siteName, user }: Props) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-foreground/10 bg-background/70 backdrop-blur-md">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 md:px-8">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 md:px-8 xl:max-w-screen-2xl">
         <div className="flex items-center gap-4">
           <Link href="/gallery" className="flex items-center gap-2 font-bold">
             <Images className="h-5 w-5" />
@@ -68,7 +68,7 @@ export function SiteHeader({ siteName, user }: Props) {
               <DropdownMenuItem onClick={() => router.push("/dashboard/settings")}>
                 <User className="mr-2 h-4 w-4" /> 个人中心
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => router.push("/dashboard/upload")}>上传图片</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push("/dashboard")}>上传图片</DropdownMenuItem>
               {user.role === "ADMIN" && (
                 <DropdownMenuItem onClick={() => router.push("/admin")}>管理后台</DropdownMenuItem>
               )}

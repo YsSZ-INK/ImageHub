@@ -19,6 +19,9 @@ const PUBLIC_API = [
 
 const PUBLIC_PAGES = ["/", "/forgot-password", "/reset-password", "/verify-email"];
 
+// 图片直链（raw/thumb）对匿名放行到路由层，由可见性校验决定（PUBLIC/UNLISTED 可作外链）
+const ANON_IMAGE_ASSET_RE = /^\/api\/images\/[^/]+\/(raw|thumb)$/;
+
 const PROTECTED_PAGE_PREFIX = ["/gallery", "/u/", "/albums/", "/images/", "/dashboard", "/admin"];
 
 const INK_BG_COUNT = 4; // public/ink-1..4.png
@@ -51,7 +54,10 @@ export default auth((req) => {
   if (PUBLIC_PAGES.includes(path)) return nextWithInkBg(req);
 
   const isProtectedPage = PROTECTED_PAGE_PREFIX.some((p) => path.startsWith(p));
-  const isProtectedApi = path.startsWith("/api/") && !PUBLIC_API.some((p) => path.startsWith(p));
+  const isProtectedApi =
+    path.startsWith("/api/") &&
+    !PUBLIC_API.some((p) => path.startsWith(p)) &&
+    !(logged === false && ANON_IMAGE_ASSET_RE.test(path));
 
   if (!logged && (isProtectedPage || isProtectedApi)) {
     if (isProtectedApi) {

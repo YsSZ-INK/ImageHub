@@ -4,7 +4,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Link2, Copy, FileCode, Globe, EyeOff, Lock, Loader2, Trash2, RotateCcw, HardDriveDownload } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { buildSnippets } from "@/lib/utils";
+import { buildSnippets, cn } from "@/lib/utils";
 
 // 复制片段：全部指向站内需登录页面，绝不生成匿名直链
 export function CopyField({ imageId, filename }: { imageId: string; filename: string }) {
@@ -54,8 +54,8 @@ export function CopyField({ imageId, filename }: { imageId: string; filename: st
   );
 }
 
-// 可见性徽标
-export function VisibilityBadge({ visibility }: { visibility: string }) {
+// 可见性徽标（className 可覆盖默认配色）
+export function VisibilityBadge({ visibility, className }: { visibility: string; className?: string }) {
   const map: Record<string, { icon: typeof Globe; text: string; cls: string }> = {
     PUBLIC: { icon: Globe, text: "公开", cls: "bg-zinc-800/5 text-zinc-600 ring-1 ring-zinc-800/10" },
     UNLISTED: { icon: EyeOff, text: "有链可见", cls: "bg-zinc-800/12 text-zinc-700 ring-1 ring-zinc-800/20" },
@@ -64,7 +64,7 @@ export function VisibilityBadge({ visibility }: { visibility: string }) {
   const it = map[visibility] ?? map.PUBLIC;
   const Icon = it.icon;
   return (
-    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${it.cls}`}>
+    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${cn(it.cls, className)}`}>
       <Icon className="h-3 w-3" />
       {it.text}
     </span>

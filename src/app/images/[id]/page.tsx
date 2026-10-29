@@ -23,7 +23,7 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
   return (
     <>
       <SiteHeader siteName={settings.siteName} user={{ name: viewer.name, role: viewer.role, avatarUrl: viewer.avatarUrl }} />
-      <main className="mx-auto max-w-6xl space-y-4 p-4">
+      <main className="mx-auto max-w-6xl space-y-4 p-4 xl:max-w-7xl">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h1 className="flex items-center gap-2 text-xl font-bold">
             <span className="max-w-md truncate">{img.filename}</span>

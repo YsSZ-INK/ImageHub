@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, FolderPlus, Tags, Eye, Trash2, X } from "lucide-react";
+import { Loader2, FolderPlus, Tags, Eye, Trash2, X, Link2, UploadCloud, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { ImageGrid, EmptyState } from "@/components/image-grid";
+import { UploadDropzone } from "@/components/upload-dropzone";
+import { VisibilityBadge } from "@/components/image-actions";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import type { ImageDTO } from "@/server/image.service";
 
@@ -20,6 +23,7 @@ export function MyImagesClient({ albums, tags }: { albums: { id: string; name: s
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batching, setBatching] = useState(false);
   const [dialog, setDialog] = useState<"album" | "tag" | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const [albumId, setAlbumId] = useState("");
   const [tagId, setTagId] = useState("");
 
@@ -80,54 +84,82 @@ export function MyImagesClient({ albums, tags }: { albums: { id: string; name: s
     await runBatch("delete");
   }
 
+  // 复制图片外链（原图直链；PUBLIC/UNLISTED 免登录可访问）
+  async function copyLink(id: string) {
+    const url = `${window.location.origin}/api/images/${id}/raw`;
+    await navigator.clipboard.writeText(url);
+    toast.success("外链已复制", { description: url });
+  }
+
   return (
     <div className="space-y-4">
       {items.length === 0 && !loading ? (
-        <EmptyState title="还没有图片" description="去上传你的第一张图片吧" />
+        <>
+          {/* 上传入口：按钮弹出上传界面 */}
+          <div className="flex justify-end">
+            <Button size="sm" onClick={() => setUploadOpen(true)}>
+              <UploadCloud className="h-4 w-4" /> 上传图片
+            </Button>
+          </div>
+          <EmptyState title="还没有图片" description="去上传你的第一张图片吧" />
+        </>
       ) : (
         <>
-          {/* 多选模式 */}
-          <div className="flex items-center gap-2 text-sm">
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={selected.size > 0 && selected.size === items.length}
-                onChange={(e) => setSelected(e.target.checked ? new Set(items.map((i) => i.id)) : new Set())}
-              />
-              全选
-            </label>
-            {selected.size > 0 && (
+          {/* 工具栏：多选 + 批量操作 + 上传按钮 */}
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={selected.size > 0 && selected.size === items.length}
+                  onChange={(e) => setSelected(e.target.checked ? new Set(items.map((i) => i.id)) : new Set())}
+                />
+                全选
+              </label>
+              {/* 批量操作栏：常驻显示，未选中时禁用操作 */}
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-muted-foreground">已选 {selected.size} 张</span>
-                <Button size="sm" variant="outline" disabled={batching} onClick={() => setDialog("album")}>
-                  <FolderPlus className="h-3.5 w-3.5" /> 移动相册
+                <span className="text-sm text-muted-foreground">已选 {selected.size} 张</span>
+                <Button size="sm" variant="outline" className="text-sm" disabled={batching || selected.size === 0} onClick={() => setDialog("album")}>
+                  <FolderPlus className="h-4 w-4" /> 移动相册
                 </Button>
-                <Button size="sm" variant="outline" disabled={batching} onClick={() => setDialog("tag")}>
-                  <Tags className="h-3.5 w-3.5" /> 打标签
+                <Button size="sm" variant="outline" className="text-sm" disabled={batching || selected.size === 0} onClick={() => setDialog("tag")}>
+                  <Tags className="h-4 w-4" /> 打标签
                 </Button>
-                <Select
-                  className="h-8 w-32 text-xs"
-                  value=""
-                  disabled={batching}
-                  onChange={(e) => e.target.value && runBatch("visibility", { visibility: e.target.value })}
-                >
-                  <option value="">设置可见性…</option>
-                  <option value="PUBLIC">公开（登录可见）</option>
-                  <option value="UNLISTED">有链可见</option>
-                  <option value="PRIVATE">私有</option>
-                </Select>
-                <Button size="sm" variant="destructive" disabled={batching} onClick={batchDelete}>
-                  <Trash2 className="h-3.5 w-3.5" /> 删除
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="sm" variant="outline" className="text-sm" disabled={batching || selected.size === 0}>
+                      设置可见性 <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem onClick={() => runBatch("visibility", { visibility: "PUBLIC" })}>
+                      公开（所有人可见）
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => runBatch("visibility", { visibility: "UNLISTED" })}>
+                      有链可见（拿到链接即可看）
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => runBatch("visibility", { visibility: "PRIVATE" })}>
+                      私有（仅自己 · 不提供外链）
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button size="sm" variant="destructive" className="text-sm" disabled={batching || selected.size === 0} onClick={batchDelete}>
+                  <Trash2 className="h-4 w-4" /> 删除
                 </Button>
-                <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="取消选择" onClick={() => setSelected(new Set())}>
-                  <X className="h-3.5 w-3.5" />
-                </Button>
+                {selected.size > 0 && (
+                  <Button size="icon" variant="ghost" className="h-7 w-7" aria-label="取消选择" onClick={() => setSelected(new Set())}>
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                )}
               </div>
-            )}
+            </div>
+            <Button size="sm" onClick={() => setUploadOpen(true)}>
+              <UploadCloud className="h-4 w-4" /> 上传图片
+            </Button>
           </div>
 
           {/* 带复选框的网格 */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8">
             {items.map((img) => (
               <div key={img.id} className="group relative overflow-hidden rounded-lg border border-border">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -146,6 +178,21 @@ export function MyImagesClient({ albums, tags }: { albums: { id: string; name: s
                     onChange={() => toggle(img.id)}
                   />
                 </label>
+                <div className="absolute bottom-2 right-2 z-10 transition-opacity group-hover:opacity-0">
+                  <VisibilityBadge visibility={img.visibility} className="bg-transparent text-black ring-0" />
+                </div>
+                <button
+                  type="button"
+                  aria-label="复制外链"
+                  title="复制外链"
+                  className="absolute right-2 top-2 rounded-md bg-black/60 p-1.5 text-white opacity-0 transition-opacity hover:bg-black/80 group-hover:opacity-100"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    copyLink(img.id);
+                  }}
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                </button>
                 <p className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent p-1.5 text-xs text-white opacity-0 group-hover:opacity-100">
                   {img.filename}
                 </p>
@@ -163,6 +210,16 @@ export function MyImagesClient({ albums, tags }: { albums: { id: string; name: s
         </>
       )}
 
+      {/* 上传弹窗：整批结束后刷新列表 */}
+      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>上传图片</DialogTitle>
+          </DialogHeader>
+          <UploadDropzone onSettled={() => load(true)} />
+        </DialogContent>
+      </Dialog>
+
       {/* 移动相册 / 打标签弹窗 */}
       <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent className="max-w-sm">
@@ -178,6 +235,7 @@ export function MyImagesClient({ albums, tags }: { albums: { id: string; name: s
                     {a.name}
                   </option>
                 ))}
+                <option value="none">移出相册（清空归属）</option>
               </Select>
             ) : (
               <Select value={tagId} onChange={(e) => setTagId(e.target.value)}>
@@ -197,7 +255,7 @@ export function MyImagesClient({ albums, tags }: { albums: { id: string; name: s
                 disabled={batching || (dialog === "album" ? !albumId : !tagId)}
                 onClick={() =>
                   dialog === "album"
-                    ? runBatch("album", { albumId: albumId || null })
+                    ? runBatch("album", { albumId: albumId === "none" ? null : albumId })
                     : runBatch("tag", { tagId })
                 }
               >

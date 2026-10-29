@@ -29,7 +29,7 @@ export default async function GalleryPage({
     <>
       <InkBackdrop />
       <SiteHeader siteName={settings.siteName} user={{ name: user.name, role: user.role, avatarUrl: user.avatarUrl }} />
-      <main className="mx-auto max-w-7xl space-y-5 p-4 md:px-8 md:py-8">
+      <main className="mx-auto max-w-7xl space-y-5 p-4 md:px-8 md:py-8 xl:max-w-screen-2xl">
         {/* 题款式页头 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -40,7 +40,7 @@ export default async function GalleryPage({
             </div>
           </div>
           <Button asChild>
-            <Link href="/dashboard/upload">
+            <Link href="/dashboard">
               <UploadCloud className="h-4 w-4" />
               上传图片
             </Link>

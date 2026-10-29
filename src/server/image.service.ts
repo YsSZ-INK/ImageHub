@@ -49,12 +49,11 @@ function toDTO(img: Image & { user?: { name: string }; tags?: { tag: { id: strin
   };
 }
 
-// ============ 可见性判定（严格私有：仅登录用户可见） ============
-// PUBLIC: 所有登录用户可见；UNLISTED: 登录用户有链接可见，不进列表；PRIVATE: 仅本人/管理员
+// ============ 可见性判定 ============
+// PUBLIC: 所有用户可见（含未登录，用于外链直链）；UNLISTED: 有链接可见（含未登录），不进列表；PRIVATE: 仅本人/管理员
 export function canView(img: Image, viewer: Viewer | null): boolean {
-  if (!viewer) return false; // 未登录一律不可见
-  if (viewer.role === "ADMIN") return true;
-  if (img.userId === viewer.id) return true;
+  if (viewer?.role === "ADMIN") return true;
+  if (img.userId === viewer?.id) return true;
   return img.visibility === "PUBLIC" || img.visibility === "UNLISTED";
 }
 
@@ -272,7 +271,19 @@ export async function updateImage(id: string, viewer: Viewer, data: { filename?:
 // 软删除 → 回收站
 export async function softDeleteImage(id: string, viewer: Viewer) {
   await assertOwnership(id, viewer);
+  await clearAlbumCovers([id]);
   return prisma.image.update({ where: { id }, data: { deletedAt: new Date() } });
+}
+
+// 封面图被移出相册/删除后，清空引用它的相册封面（excludeAlbumId 用于图片仍在目标相册内的情形）
+async function clearAlbumCovers(imageIds: string[], excludeAlbumId?: string) {
+  await prisma.album.updateMany({
+    where: {
+      coverImageId: { in: imageIds },
+      ...(excludeAlbumId ? { id: { not: excludeAlbumId } } : {}),
+    },
+    data: { coverImageId: null },
+  });
 }
 
 export async function restoreImage(id: string, viewer: Viewer) {
@@ -284,6 +295,7 @@ export async function restoreImage(id: string, viewer: Viewer) {
 export async function purgeImage(id: string, viewer: Viewer) {
   const img = await assertOwnership(id, viewer);
   const storage = await getStorage();
+  await clearAlbumCovers([id]);
   await prisma.image.delete({ where: { id } });
   await Promise.allSettled([storage.delete(img.storageKey), storage.delete(img.thumbKey)]);
   await prisma.user.update({
@@ -313,6 +325,7 @@ export async function batchImages(viewer: Viewer, input: z.infer<typeof batchAct
 
   switch (action) {
     case "delete":
+      await clearAlbumCovers(owned.map((i) => i.id));
       await prisma.image.updateMany({
         where: { id: { in: owned.map((i) => i.id) }, deletedAt: null },
         data: { deletedAt: new Date() },
@@ -341,6 +354,8 @@ export async function batchImages(viewer: Viewer, input: z.infer<typeof batchAct
           throw new AppError("相册不存在或无权访问", 403);
         }
       }
+      // 图片被移出原相册（或移往别的相册）时，清空原相册对它们的封面引用
+      await clearAlbumCovers(owned.map((i) => i.id), input.albumId ?? undefined);
       await prisma.image.updateMany({
         where: { id: { in: owned.map((i) => i.id) } },
         data: { albumId: input.albumId ?? null },
@@ -418,7 +433,7 @@ export async function updateAlbum(id: string, viewer: Viewer, input: z.infer<typ
   const album = await prisma.album.findUnique({ where: { id } });
   if (!album) throw new AppError("相册不存在", 404);
   if (album.userId !== viewer.id && viewer.role !== "ADMIN") throw new AppError("无权操作", 403);
-  if (input.coverImageId) {
+  if (input.coverImageId != null) {
     const img = await prisma.image.findUnique({ where: { id: input.coverImageId } });
     if (!img || img.albumId !== id) throw new AppError("封面图片必须属于该相册", 400);
   }
@@ -435,12 +450,15 @@ export async function deleteAlbum(id: string, viewer: Viewer) {
 export async function getAlbumForView(idOrSlug: string, viewer: Viewer) {
   const album = await prisma.album.findFirst({
     where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
-    include: { user: { select: { name: true } } },
+    include: {
+      user: { select: { name: true } },
+      _count: { select: { images: { where: { deletedAt: null } } } },
+    },
   });
   if (!album) throw new AppError("相册不存在", 404);
   const isOwner = album.userId === viewer.id || viewer.role === "ADMIN";
   if (!isOwner && album.visibility !== "PUBLIC") throw new AppError("无权访问该相册", 403);
-  return album;
+  return { ...album, imageCount: album._count.images };
 }
 
 // ============ 标签 ============

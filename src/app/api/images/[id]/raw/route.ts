@@ -7,15 +7,13 @@ import { getStorage } from "@/lib/storage";
 export const runtime = "nodejs";
 
 /**
- * 受保护的图片原图访问：
- * - 未登录 → 401（无匿名直链、无签名 URL）
- * - 校验归属/可见性（防 IDOR）
- * - 响应不暴露存储 key
+ * 图片原图访问：
+ * - PUBLIC / UNLISTED：免登录直链（外链），响应可公开缓存
+ * - PRIVATE：仅本人 / 管理员（未登录 401）
+ * - 校验可见性（防 IDOR），响应不暴露存储 key
  */
 async function serveImage(id: string, kind: "raw" | "thumb", download = false) {
   const viewer = await getCurrentUser();
-  if (!viewer) return NextResponse.json({ ok: false, error: "未登录" }, { status: 401 });
-
   const img = await getImageForView(id, viewer);
   const storage = await getStorage();
   const key = kind === "thumb" ? img.thumbKey : img.storageKey;
@@ -28,10 +26,10 @@ async function serveImage(id: string, kind: "raw" | "thumb", download = false) {
 
   const headers: Record<string, string> = {
     "Content-Type": kind === "thumb" ? "image/webp" : img.mimeType,
-    "Cache-Control": "private, max-age=31536000, immutable",
+    "Cache-Control": `${viewer ? "private" : "public"}, max-age=31536000, immutable`,
     "X-Content-Type-Options": "nosniff",
   };
-  if (download) {
+  if (download && viewer) {
     headers["Content-Disposition"] = `attachment; filename*=UTF-8''${encodeURIComponent(img.filename)}`;
   }
   return new NextResponse(new Uint8Array(buf), { headers });
