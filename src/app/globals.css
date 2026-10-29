@@ -111,6 +111,11 @@ button:not(:disabled),
 label {
   user-select: none;
 }
+/* 侧栏/顶栏属界面装饰文字（导航、配额条、标题等）：禁止选中，避免点击出现文本输入状态 */
+aside,
+header {
+  user-select: none;
+}
 * {
   scrollbar-width: thin;
   scrollbar-color: hsl(var(--foreground) / 0.22) transparent;
