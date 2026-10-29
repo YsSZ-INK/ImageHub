@@ -41,6 +41,10 @@ COPY --from=build /app/prisma ./prisma
 # 全局安装 prisma CLI（npm 自动带全依赖闭包），供启动前执行数据库迁移
 RUN npm install -g prisma@6.19.3 --no-audit --no-fund
 
+# 预创建存储目录并赋属主：命名卷首次挂载时 Docker 会复制该路径的属主，
+# 否则卷为 root 所有，非 root 进程写文件报 EACCES
+RUN mkdir -p /app/storage && chown nextjs:nodejs /app/storage
+
 USER nextjs
 EXPOSE 3000
 ENV PORT=3000
