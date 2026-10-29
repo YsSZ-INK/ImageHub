@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { handle, assertSameOrigin, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
 import { getSettings, envMaxUploadMB } from "@/lib/settings";
-import { ALLOWED_MIMES } from "@/lib/image";
 import { uploadImages, attachTagsByName } from "@/server/image.service";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -34,12 +33,8 @@ export const POST = handle(async (req: Request) => {
 
   const payloads: { buf: Buffer; name: string; contentType: string }[] = [];
   for (const f of files) {
-    // 声明类型预检
-    if (!(f.type in ALLOWED_MIMES)) {
-      payloads.push({ buf: Buffer.alloc(0), name: f.name, contentType: f.type });
-      continue;
-    }
     if (f.size > maxBytes) throw new AppError(`文件 ${f.name} 超过大小上限 ${maxMB}MB`, 413);
+    // 不依赖浏览器声明的 MIME（拖拽文件可能为空或非标准值），统一交给魔数校验
     const buf = Buffer.from(await f.arrayBuffer());
     payloads.push({ buf, name: f.name || "image", contentType: f.type });
   }

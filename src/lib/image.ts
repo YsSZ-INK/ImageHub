@@ -74,7 +74,7 @@ export async function processAndStoreImage(
   originalName: string
 ): Promise<ProcessedUpload> {
   const mime = detectImageMime(buf);
-  if (!mime) throw new AppError("不支持的图片格式（仅允许 jpg/png/webp/gif/avif）", 415);
+  if (!mime) throw new AppError("不支持的图片格式（仅允许 jpg/jpeg/png/webp/gif/avif）", 415);
 
   const sha256 = createHash("sha256").update(buf).digest("hex");
   const convertWebp = process.env.CONVERT_TO_WEBP === "true" && (mime === "image/jpeg" || mime === "image/png");

@@ -68,7 +68,8 @@ export function UploadDropzone() {
   }
 
   function addFiles(files: FileList | File[]) {
-    const valid = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    // 允许 type 为空的文件（部分应用拖拽时浏览器识别不出 MIME），由服务端魔数校验兜底
+    const valid = Array.from(files).filter((f) => !f.type || f.type.startsWith("image/"));
     if (valid.length === 0) {
       toast.error("仅支持图片文件");
       return;
@@ -145,12 +146,12 @@ export function UploadDropzone() {
         <UploadCloud className={cn("h-10 w-10 text-muted-foreground transition-transform duration-200", dragOver && "-translate-y-1 text-seal scale-110")} />
         <div>
           <p className="font-medium">拖拽图片到此处，或点击选择文件</p>
-          <p className="mt-1 text-xs text-muted-foreground">支持 jpg / png / webp / gif / avif · 支持粘贴 · 多文件并发</p>
+          <p className="mt-1 text-xs text-muted-foreground">支持 jpg / jpeg / png / webp / gif / avif · 支持粘贴 · 多文件并发</p>
         </div>
         <input
           ref={inputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+          accept="image/jpeg,.jpg,.jpeg,image/png,image/webp,image/gif,image/avif"
           multiple
           hidden
           onChange={(e) => {
