@@ -101,20 +101,19 @@ h2,
   background: hsl(var(--seal) / 0.22);
 }
 
-/* 按钮/可点击元素：指针光标 + 禁止选中文字（Tailwind v4 移除了 button 默认 pointer，
-   且按钮文字可被划选，导致点击时出现文本输入状态） */
+/* 按钮/可点击元素：指针光标（Tailwind v4 移除了 button 默认 pointer） */
 button:not(:disabled),
 [role="button"]:not(:disabled) {
   cursor: pointer;
+}
+/* 全局禁止选中文字：界面点击一律不出现文本输入状态（外链等均有复制按钮）。
+   仅输入框/文本域放行（可编辑、需拖选） */
+body {
   user-select: none;
 }
-label {
-  user-select: none;
-}
-/* 侧栏/顶栏属界面装饰文字（导航、配额条、标题等）：禁止选中，避免点击出现文本输入状态 */
-aside,
-header {
-  user-select: none;
+input,
+textarea {
+  user-select: text;
 }
 * {
   scrollbar-width: thin;
