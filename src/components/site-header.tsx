@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { Images, LayoutDashboard, Shield, User, LogOut, Menu } from "lucide-react";
+import { Images, LayoutDashboard, Shield, LogOut, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -43,7 +43,7 @@ export function SiteHeader({ siteName, user }: Props) {
                 公共画廊
               </Button>
             </Link>
-            <Link href="/dashboard">
+            <Link href="/images">
               <Button variant="ghost" size="sm" className="font-display tracking-wide">
                 <LayoutDashboard className="h-4 w-4" />
                 我的图片
@@ -65,10 +65,8 @@ export function SiteHeader({ siteName, user }: Props) {
             <DropdownMenuContent align="end" className="w-44">
               <div className="px-2 py-1.5 text-xs text-muted-foreground truncate">{user.name}</div>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => router.push("/dashboard/settings")}>
-                <User className="mr-2 h-4 w-4" /> 个人中心
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => router.push("/dashboard")}>上传图片</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push("/settings")}>个人中心</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push("/images")}>上传图片</DropdownMenuItem>
               {user.role === "ADMIN" && (
                 <DropdownMenuItem onClick={() => router.push("/admin")}>管理后台</DropdownMenuItem>
               )}

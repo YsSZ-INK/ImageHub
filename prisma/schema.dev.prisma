@@ -25,7 +25,6 @@ model User {
 
   images    Image[]
   albums    Album[]
-  tags      Tag[]
   apiTokens ApiToken[]
   tokens    Token[]
 }
@@ -49,7 +48,6 @@ model Image {
 
   user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   album    Album?     @relation(fields: [albumId], references: [id], onDelete: SetNull)
-  tags     ImageTag[]
 
   @@index([userId, createdAt])
   @@index([sha256])
@@ -71,28 +69,6 @@ model Album {
   images Image[]
 
   @@unique([userId, slug])
-}
-
-model Tag {
-  id        String   @id @default(cuid())
-  userId    String
-  name      String
-  createdAt DateTime @default(now())
-
-  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  imageTag ImageTag[]
-
-  @@unique([userId, name])
-}
-
-model ImageTag {
-  imageId String
-  tagId   String
-
-  image Image @relation(fields: [imageId], references: [id], onDelete: Cascade)
-  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
-
-  @@id([imageId, tagId])
 }
 
 model ApiToken {

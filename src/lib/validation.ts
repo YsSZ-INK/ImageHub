@@ -45,10 +45,9 @@ export const imageUpdateSchema = z.object({
 
 export const batchActionSchema = z.object({
   ids: z.array(z.string().min(1)).min(1, "请先选择图片").max(200),
-  action: z.enum(["delete", "restore", "purge", "visibility", "album", "tag", "untag"]),
+  action: z.enum(["delete", "restore", "purge", "visibility", "album"]),
   visibility: z.enum(visibilityValues).optional(),
   albumId: z.string().nullable().optional(),
-  tagId: z.string().optional(),
 });
 
 export const albumCreateSchema = z.object({
@@ -64,10 +63,6 @@ export const albumUpdateSchema = z.object({
   coverImageId: z.string().nullable().optional(),
 });
 
-export const tagCreateSchema = z.object({
-  name: z.string().min(1, "标签名不能为空").max(30).trim(),
-});
-
 export const adminUserUpdateSchema = z.object({
   status: z.enum(["ACTIVE", "BANNED"]).optional(),
   role: z.enum(["USER", "ADMIN"]).optional(),
@@ -78,6 +73,13 @@ export const adminSettingsSchema = z.object({
   siteName: z.string().min(1).max(50),
   allowRegister: z.boolean(),
   maxUploadMB: z.number().min(1).max(512),
+  // 邮件（SMTP）配置：host 为空表示未配置；端口 0 表示未设置
+  smtpHost: z.string().max(255).trim(),
+  smtpPort: z.number().int().min(0).max(65535),
+  smtpSecure: z.boolean(),
+  smtpUser: z.string().max(255).trim(),
+  smtpPass: z.string().max(255),
+  smtpFrom: z.string().max(255).trim(),
 });
 
 export const resetPasswordSchema = z.object({

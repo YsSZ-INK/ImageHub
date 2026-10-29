@@ -32,14 +32,3 @@ export async function InkBackdrop() {
     </div>
   );
 }
-
-/** 方形印章（朱砂印泥红，微倾模拟手工钤印） */
-export function InkSeal({ char, className = "" }: { char: string; className?: string }) {
-  return (
-    <span
-      className={`flex h-7 w-7 shrink-0 -rotate-2 items-center justify-center rounded-[3px] bg-seal text-xs font-bold text-seal-foreground shadow-sm ring-1 ring-seal/30 ${className}`}
-    >
-      {char}
-    </span>
-  );
-}

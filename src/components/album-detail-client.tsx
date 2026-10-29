@@ -148,7 +148,7 @@ export function AlbumDetailClient({
       {/* 相册头部：信息 + 编辑 */}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <Link href="/dashboard/albums" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+          <Link href="/albums" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
             <ChevronLeft className="h-3.5 w-3.5" /> 返回相册管理
           </Link>
           <h1 className="mt-1 flex items-center gap-2 text-xl font-bold">

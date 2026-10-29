@@ -19,7 +19,6 @@ export const GET = handle(async (req: Request) => {
     scope,
     albumId: url.searchParams.get("albumId") ?? undefined,
     username: url.searchParams.get("username") ?? undefined,
-    tag: url.searchParams.get("tag") ?? undefined,
     sort: (url.searchParams.get("sort") as ListParams["sort"]) ?? "newest",
     cursor: url.searchParams.get("cursor") ?? undefined,
     take: Number(url.searchParams.get("take") ?? 24),

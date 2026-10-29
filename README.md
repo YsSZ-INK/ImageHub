@@ -26,7 +26,7 @@
 - 「我的图片」页右上角一键上传：弹窗内支持拖拽 / 点击选择 / 粘贴 / URL 抓取，多文件并发 + 进度条 + 失败重试
 - sha256 秒传去重；自动生成 400px WebP 缩略图与 blurhash 占位；可选全量 jpg/png → WebP 转码（`CONVERT_TO_WEBP`）
 - 魔数校验真实文件类型（不信任浏览器 MIME 声明），EXIF 自动剥离
-- 批量操作栏常驻：删除 / 移动相册 / 打标签 / 设置可见性
+- 批量操作栏常驻：删除 / 移动相册 / 设置可见性
 - 图片卡片 hover 复制外链（原图 raw 直链，公开图可直接引用）
 - 回收站（软删除保留 30 天自动清理）、搜索排序
 
@@ -38,7 +38,7 @@
 
 **画廊与浏览**
 
-- 瀑布流 / 方格切换、分页加载、标签筛选、灯箱（键盘 ← → ESC / I）
+- 瀑布流 / 方格切换、分页加载、灯箱（键盘 ← → ESC / I）
 - 公共画廊、用户主页（`/u/[username]`）、相册页
 - 全分辨率响应式：移动端横向导航、标准桌面侧栏布局、超大屏 8 列网格
 
@@ -58,7 +58,7 @@ download 接口始终需要登录，不生成匿名直链 / 签名 URL。
 - 个人中心（昵称 / 头像 / 密码 / 配额）、账号注销（级联清理存储）
 - 第一个注册的账号自动成为管理员
 
-**后台**（仅 ADMIN）：用户管理（封禁 / 角色 / 配额）、图片审核（下架 / 删除）、统计面板（近 7 天趋势）、站点设置（如关闭开放注册）
+**后台**（仅 ADMIN）：用户管理（封禁 / 角色 / 配额）、图片审核（下架 / 删除）、统计面板（近 7 天趋势）、站点设置（常规项与邮件 SMTP 配置，如关闭开放注册）
 
 **其他**：内存 / Redis 限流、深色模式、骨架屏、Toast、空状态、宣纸纹理 + 印章水墨 UI
 
@@ -120,7 +120,8 @@ docker compose --profile redis up -d
 | `MAX_UPLOAD_MB` | - | 单文件大小上限（MB），默认 50 |
 | `CONVERT_TO_WEBP` | - | 是否自动将 jpg/png 转 WebP，默认 false |
 | `REDIS_URL` | - | 可选，配置后限流走 Redis，否则降级为进程内存实现 |
-| `SMTP_URL` / `RESEND_API_KEY` | - | 可选，接入邮件服务后验证 / 重置邮件改为真实发送 |
+
+邮件发送：后台「站点设置 → 邮件配置」填写 SMTP 后，验证 / 重置邮件真实发送；未配置时打印到服务端控制台。
 
 ## 反向代理与 HTTPS
 
@@ -141,7 +142,7 @@ Nginx 需注意调整 `client_max_body_size`（大于上传上限）。
 
 | 卷 | 内容 |
 | --- | --- |
-| `imagehub_postgres_data` | 数据库（用户 / 图片元数据 / 相册标签等） |
+| `imagehub_postgres_data` | 数据库（用户 / 图片元数据 / 相册等） |
 | `imagehub_storage_data` | 图片原始文件与缩略图 |
 
 备份：
@@ -203,7 +204,7 @@ imagehub/
 │   └── migrations/            # PostgreSQL 迁移
 ├── public/                    # 水墨背景图（ink-1~4.png）等静态资源
 ├── src/
-│   ├── app/                   # 页面与 API 路由（App Router）
+│   ├── app/                   # 页面与 API 路由（App Router，登录页统一在 (console) 路由组）
 │   ├── components/            # UI 组件（相册 / 图片网格 / 上传 / 水墨主题等）
 │   ├── server/                # 业务逻辑（image.service：上传 / 列表 / 相册 / 批量）
 │   ├── lib/                   # 会话 / zod 校验 / 存储驱动 / 限流
@@ -211,6 +212,19 @@ imagehub/
 ├── Dockerfile                 # 多阶段构建（deps → build → runner）
 └── docker-compose.yml         # web + postgres（可选 redis profile）
 ```
+
+## 页面路由
+
+| 地址 | 页面 | 可见性 |
+| --- | --- | --- |
+| `/` | 落地页（登录 / 注册入口） | 公开 |
+| `/gallery` | 公共画廊 | 登录 |
+| `/images`、`/images/[id]` | 我的图片 / 图片详情 | 登录（详情按可见性） |
+| `/albums`、`/albums/[id]` | 相册管理 / 相册页 | 登录（按可见性） |
+| `/trash` | 回收站 | 登录 |
+| `/settings` | 个人中心 | 登录 |
+| `/u/[username]` | 用户主页 | 登录 |
+| `/admin`、`/admin/users`、`/admin/images`、`/admin/settings` | 统计 / 用户 / 图片审核 / 站点设置 | 仅 ADMIN |
 
 ## 故障排查
 

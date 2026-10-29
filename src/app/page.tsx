@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
 import { Suspense } from "react";
 import Image from "next/image";
 import { Lock, Images, Upload, ShieldCheck, Brush } from "lucide-react";
@@ -14,7 +13,7 @@ const NOISE =
 
 const FEATURES = [
   { icon: Lock, text: "图片严格私有，所有访问需登录" },
-  { icon: Images, text: "相册 · 标签 · 瀑布流画廊" },
+  { icon: Images, text: "相册 · 瀑布流画廊" },
   { icon: Upload, text: "拖拽 / 粘贴上传，自动缩略图" },
   { icon: ShieldCheck, text: "管理后台与开放 API" },
 ];
@@ -27,9 +26,9 @@ export default async function HomePage() {
   const user = await getCurrentUser();
   if (user) redirect("/gallery");
   const settings = await getSettings();
-  // 与后台同一幅：middleware 会话级固定（ink-bg cookie）
-  const idx = Number((await cookies()).get("ink-bg")?.value ?? 0);
-  const bg = BG_IMAGES[idx] ?? BG_IMAGES[0];
+  // 登录页每次进入随机一幅（登录后页面仍按 ink-bg cookie 会话固定）
+  const idx = Math.floor(Math.random() * BG_IMAGES.length);
+  const bg = BG_IMAGES[idx];
 
   return (
     <main className="relative flex min-h-screen flex-col overflow-hidden">

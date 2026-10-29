@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { createHash, randomBytes } from "crypto";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
-import { mailer } from "@/lib/mailer";
+import { getMailer } from "@/lib/mailer";
 import { getStorage } from "@/lib/storage";
 import { processAndStoreAvatar } from "@/lib/image";
 import type { User } from "@prisma/client";
@@ -53,7 +53,7 @@ export async function sendVerifyEmail(user: User) {
   if (user.emailVerified) throw new AppError("邮箱已验证", 400);
   const token = await createToken(user.id, "EMAIL_VERIFY", 24 * 3600_000);
   const link = `${SITE_URL()}/verify-email?token=${token}`;
-  await mailer.send(user.email, "ImageHub 邮箱验证", `请在 24 小时内点击链接完成验证：\n${link}`);
+  await (await getMailer()).send(user.email, "ImageHub 邮箱验证", `请在 24 小时内点击链接完成验证：\n${link}`);
 }
 
 export async function verifyEmail(token: string) {
@@ -77,7 +77,7 @@ export async function requestPasswordReset(input: z.infer<typeof requestResetSch
   if (!user) return;
   const token = await createToken(user.id, "PASSWORD_RESET", 3600_000);
   const link = `${SITE_URL()}/reset-password?token=${token}`;
-  await mailer.send(user.email, "ImageHub 重置密码", `请在 1 小时内点击链接重置密码：\n${link}`);
+  await (await getMailer()).send(user.email, "ImageHub 重置密码", `请在 1 小时内点击链接重置密码：\n${link}`);
 }
 
 export async function resetPassword(input: z.infer<typeof resetPasswordSchema>) {
@@ -136,7 +136,7 @@ export async function deleteAccount(user: User) {
   const images = await prisma.image.findMany({ where: { userId: user.id } });
   const storage = await getStorage();
   const keys = images.flatMap((i) => [i.storageKey, i.thumbKey]);
-  await prisma.user.delete({ where: { id: user.id } }); // 级联删除 Image/Album/Tag/Token
+  await prisma.user.delete({ where: { id: user.id } }); // 级联删除 Image/Album/Token
   // 存储删除放事务外，尽力而为
   await Promise.allSettled(keys.map((k) => storage.delete(k)));
   await storage.delete(`avatars/${user.id}.webp`).catch(() => {});

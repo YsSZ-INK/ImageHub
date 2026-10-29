@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, FolderPlus, Tags, Eye, Trash2, X, Link2, UploadCloud, ChevronDown } from "lucide-react";
+import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { ImageGrid, EmptyState } from "@/components/image-grid";
@@ -14,18 +14,17 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import type { ImageDTO } from "@/server/image.service";
 
-// 我的图片：多选 + 批量操作（删除/移动相册/打标签/改可见性）
-export function MyImagesClient({ albums, tags }: { albums: { id: string; name: string }[]; tags: { id: string; name: string }[] }) {
+// 我的图片：多选 + 批量操作（删除/移动相册/改可见性）
+export function MyImagesClient({ albums }: { albums: { id: string; name: string }[] }) {
   const router = useRouter();
   const [items, setItems] = useState<ImageDTO[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batching, setBatching] = useState(false);
-  const [dialog, setDialog] = useState<"album" | "tag" | null>(null);
+  const [dialog, setDialog] = useState<"album" | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [albumId, setAlbumId] = useState("");
-  const [tagId, setTagId] = useState("");
 
   const load = useCallback(async (reset: boolean) => {
     setLoading(true);
@@ -122,9 +121,6 @@ export function MyImagesClient({ albums, tags }: { albums: { id: string; name: s
                 <Button size="sm" variant="outline" className="text-sm" disabled={batching || selected.size === 0} onClick={() => setDialog("album")}>
                   <FolderPlus className="h-4 w-4" /> 移动相册
                 </Button>
-                <Button size="sm" variant="outline" className="text-sm" disabled={batching || selected.size === 0} onClick={() => setDialog("tag")}>
-                  <Tags className="h-4 w-4" /> 打标签
-                </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button size="sm" variant="outline" className="text-sm" disabled={batching || selected.size === 0}>
@@ -220,44 +216,29 @@ export function MyImagesClient({ albums, tags }: { albums: { id: string; name: s
         </DialogContent>
       </Dialog>
 
-      {/* 移动相册 / 打标签弹窗 */}
+      {/* 移动相册弹窗 */}
       <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{dialog === "album" ? "移动到相册" : "添加标签"}</DialogTitle>
+            <DialogTitle>移动到相册</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            {dialog === "album" ? (
-              <Select value={albumId} onChange={(e) => setAlbumId(e.target.value)}>
-                <option value="">选择相册…</option>
-                {albums.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-                <option value="none">移出相册（清空归属）</option>
-              </Select>
-            ) : (
-              <Select value={tagId} onChange={(e) => setTagId(e.target.value)}>
-                <option value="">选择标签…</option>
-                {tags.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
-                ))}
-              </Select>
-            )}
+            <Select value={albumId} onChange={(e) => setAlbumId(e.target.value)}>
+              <option value="">选择相册…</option>
+              {albums.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+              <option value="none">移出相册（清空归属）</option>
+            </Select>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setDialog(null)}>
                 取消
               </Button>
               <Button
-                disabled={batching || (dialog === "album" ? !albumId : !tagId)}
-                onClick={() =>
-                  dialog === "album"
-                    ? runBatch("album", { albumId: albumId === "none" ? null : albumId })
-                    : runBatch("tag", { tagId })
-                }
+                disabled={batching || !albumId}
+                onClick={() => runBatch("album", { albumId: albumId === "none" ? null : albumId })}
               >
                 {batching ? <Loader2 className="animate-spin" /> : null} 确定
               </Button>

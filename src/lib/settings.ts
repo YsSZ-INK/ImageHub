@@ -4,12 +4,25 @@ export type SiteSettings = {
   siteName: string;
   allowRegister: boolean;
   maxUploadMB: number;
+  // 邮件（SMTP）配置：host 为空表示未配置；端口 0 表示未设置
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  smtpUser: string;
+  smtpPass: string;
+  smtpFrom: string;
 };
 
 const DEFAULTS: SiteSettings = {
   siteName: "ImageHub",
   allowRegister: true,
   maxUploadMB: 50,
+  smtpHost: "",
+  smtpPort: 0,
+  smtpSecure: true,
+  smtpUser: "",
+  smtpPass: "",
+  smtpFrom: "",
 };
 
 let cache: { value: SiteSettings; expiresAt: number } | null = null;
@@ -24,6 +37,12 @@ export async function getSettings(): Promise<SiteSettings> {
       siteName: map.get("siteName") ?? DEFAULTS.siteName,
       allowRegister: (map.get("allowRegister") ?? "true") === "true",
       maxUploadMB: Number(map.get("maxUploadMB") ?? DEFAULTS.maxUploadMB),
+      smtpHost: map.get("smtpHost") ?? "",
+      smtpPort: Number(map.get("smtpPort") ?? 0),
+      smtpSecure: (map.get("smtpSecure") ?? "true") === "true",
+      smtpUser: map.get("smtpUser") ?? "",
+      smtpPass: map.get("smtpPass") ?? "",
+      smtpFrom: map.get("smtpFrom") ?? "",
     };
     cache = { value, expiresAt: Date.now() + 60_000 };
     return value;

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { UploadCloud, LinkIcon, X, Loader2, CheckCircle2, XCircle, Tags } from "lucide-react";
+import { UploadCloud, LinkIcon, X, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -29,8 +29,6 @@ export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
   const [items, setItems] = useState<UploadState[]>([]);
   const [remoteUrl, setRemoteUrl] = useState("");
   const [fetching, setFetching] = useState(false);
-  // 上传时自定义标签（对所有本次上传的图片生效）
-  const [tagsInput, setTagsInput] = useState("");
 
   const seqRef = useRef(0);
   const activeRef = useRef(0);
@@ -56,7 +54,6 @@ export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
     xhrRef.current.set(id, xhr);
     const form = new FormData();
     form.append("file", file);
-    if (tagsInput.trim()) form.append("tags", tagsInput);
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
@@ -195,16 +192,6 @@ export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
             if (e.target.files) addFiles(e.target.files);
             e.target.value = "";
           }}
-        />
-      </div>
-
-      {/* 自定义标签：随本次上传的所有图片生效 */}
-      <div className="relative">
-        <Tags className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="自定义标签（可选），逗号分隔，如：风景, 头像 — 对本次上传全部生效"
-          value={tagsInput}
-          onChange={(e) => setTagsInput(e.target.value)}
         />
       </div>
 

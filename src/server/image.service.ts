@@ -8,7 +8,6 @@ import type {
   batchActionSchema,
   albumCreateSchema,
   albumUpdateSchema,
-  tagCreateSchema,
 } from "@/lib/validation";
 
 export type Viewer = Pick<User, "id" | "role">;
@@ -27,10 +26,9 @@ export type ImageDTO = {
   thumbUrl: string;
   rawUrl: string;
   ownerName?: string;
-  tags?: { id: string; name: string }[];
 };
 
-function toDTO(img: Image & { user?: { name: string }; tags?: { tag: { id: string; name: string } }[] }): ImageDTO {
+function toDTO(img: Image & { user?: { name: string } }): ImageDTO {
   return {
     id: img.id,
     filename: img.filename,
@@ -45,7 +43,6 @@ function toDTO(img: Image & { user?: { name: string }; tags?: { tag: { id: strin
     thumbUrl: `/api/images/${img.id}/thumb`,
     rawUrl: `/api/images/${img.id}/raw`,
     ownerName: img.user?.name,
-    tags: img.tags?.map((it) => it.tag),
   };
 }
 
@@ -88,28 +85,6 @@ export async function uploadImages(
   return { results, deduped };
 }
 
-// 按名称为一批图片关联标签（不存在则创建，最多 10 个、单个 ≤30 字）；仅处理归属当前用户的图片
-export async function attachTagsByName(userId: string, imageIds: string[], names: string[]) {
-  const clean = [...new Set(names.map((n) => n.trim()).filter((n) => n && n.length <= 30))].slice(0, 10);
-  if (clean.length === 0 || imageIds.length === 0) return;
-  for (const name of clean) {
-    const tag = await prisma.tag.upsert({
-      where: { userId_name: { userId, name } },
-      update: {},
-      create: { userId, name },
-    });
-    for (const imageId of imageIds) {
-      const owned = await prisma.image.findFirst({ where: { id: imageId, userId }, select: { id: true } });
-      if (!owned) continue;
-      await prisma.imageTag.upsert({
-        where: { imageId_tagId: { imageId, tagId: tag.id } },
-        update: {},
-        create: { imageId, tagId: tag.id },
-      });
-    }
-  }
-}
-
 async function uploadOne(
   user: User,
   f: { buf: Buffer; name: string; contentType: string }
@@ -144,7 +119,7 @@ async function uploadOne(
         sha256: processed.sha256,
         blurhash: processed.blurhash,
       },
-      include: { user: { select: { name: true } }, tags: { include: { tag: true } } },
+      include: { user: { select: { name: true } } },
     }),
     prisma.user.update({
       where: { id: user.id },
@@ -160,7 +135,6 @@ export type ListParams = {
   scope: "gallery" | "mine" | "trash" | "album" | "user" | "admin";
   albumId?: string;
   username?: string;
-  tag?: string;
   sort?: "newest" | "oldest" | "largest";
   cursor?: string;
   take?: number;
@@ -212,11 +186,6 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
       break;
   }
 
-  // 标签筛选
-  if (p.tag) {
-    where.tags = { some: { tag: { name: p.tag } } };
-  }
-
   const orderBy =
     p.sort === "oldest" ? { createdAt: "asc" as const }
     : p.sort === "largest" ? { size: "desc" as const }
@@ -227,7 +196,7 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
     orderBy,
     take: take + 1,
     ...(p.cursor ? { cursor: { id: p.cursor }, skip: 1 } : {}),
-    include: { user: { select: { name: true } }, tags: { include: { tag: true } } },
+    include: { user: { select: { name: true } } },
   });
 
   const hasMore = rows.length > take;
@@ -240,7 +209,7 @@ export async function getImageDetail(id: string, viewer: Viewer | null) {
   const img = await getImageForView(id, viewer);
   const full = await prisma.image.findUnique({
     where: { id },
-    include: { user: { select: { name: true } }, tags: { include: { tag: true } } },
+    include: { user: { select: { name: true } } },
   });
   return full ? toDTO(full) : toDTO(img);
 }
@@ -263,7 +232,7 @@ export async function updateImage(id: string, viewer: Viewer, data: { filename?:
   const img = await prisma.image.update({
     where: { id },
     data: { filename: data.filename, visibility: data.visibility, albumId: data.albumId },
-    include: { user: { select: { name: true } }, tags: { include: { tag: true } } },
+    include: { user: { select: { name: true } } },
   });
   return toDTO(img);
 }
@@ -361,28 +330,6 @@ export async function batchImages(viewer: Viewer, input: z.infer<typeof batchAct
         data: { albumId: input.albumId ?? null },
       });
       break;
-    case "tag": {
-      if (!input.tagId) throw new AppError("缺少标签参数", 400);
-      const tag = await prisma.tag.findUnique({ where: { id: input.tagId } });
-      if (!tag || (tag.userId !== viewer.id && viewer.role !== "ADMIN")) {
-        throw new AppError("标签不存在", 403);
-      }
-      for (const img of owned) {
-        await prisma.imageTag.upsert({
-          where: { imageId_tagId: { imageId: img.id, tagId: tag.id } },
-          create: { imageId: img.id, tagId: tag.id },
-          update: {},
-        });
-      }
-      break;
-    }
-    case "untag": {
-      if (!input.tagId) throw new AppError("缺少标签参数", 400);
-      await prisma.imageTag.deleteMany({
-        where: { tagId: input.tagId, imageId: { in: owned.map((i) => i.id) } },
-      });
-      break;
-    }
   }
   return { affected: owned.length };
 }
@@ -459,40 +406,4 @@ export async function getAlbumForView(idOrSlug: string, viewer: Viewer) {
   const isOwner = album.userId === viewer.id || viewer.role === "ADMIN";
   if (!isOwner && album.visibility !== "PUBLIC") throw new AppError("无权访问该相册", 403);
   return { ...album, imageCount: album._count.images };
-}
-
-// ============ 标签 ============
-export async function listTags(viewer: Viewer, username?: string) {
-  let userId: string | undefined;
-  if (username) {
-    const target = await prisma.user.findUnique({ where: { name: username } });
-    if (!target) throw new AppError("用户不存在", 404);
-    userId = target.id;
-  }
-  const tags = await prisma.tag.findMany({
-    where: userId ? { userId } : {},
-    orderBy: { createdAt: "asc" },
-    include: { _count: { select: { imageTag: true } } },
-  });
-  return tags.map((t) => ({ id: t.id, name: t.name, imageCount: t._count.imageTag }));
-}
-
-export async function createTag(viewer: Viewer, input: z.infer<typeof tagCreateSchema>) {
-  const exists = await prisma.tag.findFirst({ where: { userId: viewer.id, name: input.name } });
-  if (exists) return exists;
-  return prisma.tag.create({ data: { userId: viewer.id, name: input.name } });
-}
-
-export async function updateTag(id: string, viewer: Viewer, name: string) {
-  const tag = await prisma.tag.findUnique({ where: { id } });
-  if (!tag) throw new AppError("标签不存在", 404);
-  if (tag.userId !== viewer.id && viewer.role !== "ADMIN") throw new AppError("无权操作", 403);
-  return prisma.tag.update({ where: { id }, data: { name } });
-}
-
-export async function deleteTag(id: string, viewer: Viewer) {
-  const tag = await prisma.tag.findUnique({ where: { id } });
-  if (!tag) throw new AppError("标签不存在", 404);
-  if (tag.userId !== viewer.id && viewer.role !== "ADMIN") throw new AppError("无权操作", 403);
-  await prisma.tag.delete({ where: { id } });
 }
