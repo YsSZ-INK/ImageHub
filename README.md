@@ -13,6 +13,8 @@
 - [环境变量](#环境变量)
 - [反向代理与 HTTPS](#反向代理与-https)
 - [数据持久化与备份](#数据持久化与备份)
+- [忘记密码](#忘记密码)
+- [一键卸载](#一键卸载)
 - [本地开发](#本地开发)
 - [双 Schema 说明](#双-schema-说明)
 - [CI/CD](#cicd)
@@ -162,6 +164,49 @@ docker compose logs -f web        # 实时日志
 docker compose down               # 停止（保留数据）
 docker compose down -v            # 停止并清空全部数据（慎用，会删除图片文件）
 ```
+
+## 忘记密码
+
+**方式一：站内「忘记密码」流程（推荐）**
+
+未配置 SMTP 时邮件会打印到 web 容器日志，同样能拿到重置链接：
+
+1. 登录页点「忘记密码」，输入邮箱提交
+2. 服务器上查看日志获取重置链接（1 小时内有效）：
+
+```bash
+docker compose logs web --tail 100 | grep -A 4 "邮件预览"
+```
+
+3. 浏览器打开日志里的 `https://<SITE_URL>/reset-password?token=...` 设置新密码
+
+> 前提：`.env` 的 `SITE_URL` 已配置为真实对外地址，否则手动把链接主机部分改成 `服务器IP:3000`。
+
+**方式二：直接改数据库（邮件流程不可用时兜底）**
+
+```bash
+# 1. 用应用容器里的 bcryptjs 生成新密码哈希（把 NewPass123 换成新密码）
+HASH=$(docker compose exec web node -e "console.log(require('bcryptjs').hashSync('NewPass123', 12))")
+
+# 2. 写入数据库（把邮箱换成自己的）
+docker compose exec postgres psql -U imagehub -d imagehub \
+  -c "UPDATE \"User\" SET \"passwordHash\" = '$HASH' WHERE email = '你的邮箱';"
+```
+
+日常改密码直接在「个人中心 → 修改密码」操作即可。
+
+## 一键卸载
+
+在项目目录执行，彻底移除容器、数据卷、镜像与项目文件：
+
+```bash
+docker compose down -v                                  # 停止并删除容器 + 数据卷（数据库、图片存储，不可恢复）
+docker image rm ghcr.io/yssz-ink/imagehub:latest        # 删除应用镜像
+docker image rm postgres:16-alpine                      # 删除数据库镜像（可选）
+rm -rf ~/imagehub                                       # 删除项目目录（含 .env 与 docker-compose.yml）
+```
+
+> `down -v` 会永久删除 `imagehub_postgres_data`（用户与图片元数据）和 `imagehub_storage_data`（图片文件），如需保留数据请先按上文方式备份。
 
 ## 本地开发（无需 Docker）
 
