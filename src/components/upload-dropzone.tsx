@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { UploadCloud, LinkIcon, X, Loader2, CheckCircle2, XCircle, Tags } from "lucide-react";
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 type UploadState = {
+  id: string;
   file: File | null;
   name: string;
   progress: number;
@@ -16,7 +17,10 @@ type UploadState = {
   error?: string;
 };
 
-// 上传组件：拖拽 / 点击选择 / 剪贴板粘贴 / URL 远程抓取；多文件并发 + 进度条 + 失败重试
+// 并发池大小：慢上行下过多并发互相挤占带宽，2 个足以填满管道又不互相拖慢
+const MAX_CONCURRENT = 2;
+
+// 上传组件：拖拽 / 点击选择 / 剪贴板粘贴 / URL 远程抓取；受控并发 + 进度条 + 失败重试
 // onSettled：本批上传全部结束（成功或失败）时触发一次，用于刷新外部列表
 export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
   const router = useRouter();
@@ -28,6 +32,11 @@ export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
   // 上传时自定义标签（对所有本次上传的图片生效）
   const [tagsInput, setTagsInput] = useState("");
 
+  const seqRef = useRef(0);
+  const activeRef = useRef(0);
+  const startedRef = useRef<Set<string>>(new Set());
+  const xhrRef = useRef<Map<string, XMLHttpRequest>>(new Map());
+
   const allSettled = items.length > 0 && items.every((i) => i.status === "done" || i.status === "error");
   const prevSettled = useRef(false);
   useEffect(() => {
@@ -38,45 +47,65 @@ export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
     if (!allSettled) prevSettled.current = false;
   }, [allSettled, onSettled]);
 
-  const startUpload = useCallback(
-    (file: File): UploadState => ({ file, name: file.name, progress: 0, status: "uploading" }),
-    []
-  );
+  function update(id: string, patch: Partial<UploadState>) {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+  }
 
-  function uploadOne(item: UploadState, idx: number) {
-    if (!item.file) return;
+  function uploadOne(id: string, file: File) {
     const xhr = new XMLHttpRequest();
+    xhrRef.current.set(id, xhr);
     const form = new FormData();
-    form.append("file", item.file);
+    form.append("file", file);
     if (tagsInput.trim()) form.append("tags", tagsInput);
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
-        const progress = Math.round((e.loaded / e.total) * 100);
-        setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, progress } : it)));
+        update(id, { progress: Math.round((e.loaded / e.total) * 100) });
       }
     };
+    const settle = () => {
+      xhrRef.current.delete(id);
+      activeRef.current = Math.max(0, activeRef.current - 1);
+    };
     xhr.onload = () => {
+      settle();
       try {
         const json = JSON.parse(xhr.responseText);
         const result = json?.data?.results?.[0];
         if (json.ok && result && !result.error) {
-          setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, status: "done", progress: 100 } : it)));
-          if (result.deduped) toast.info(`${item.name} 与已有图片重复，已复用`);
+          update(id, { status: "done", progress: 100 });
+          if (result.deduped) toast.info(`${file.name} 与已有图片重复，已复用`);
         } else {
           const err = result?.error || json.error || "上传失败";
-          setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, status: "error", error: err } : it)));
+          update(id, { status: "error", error: err });
         }
       } catch {
-        setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, status: "error", error: "服务器响应异常" } : it)));
+        update(id, { status: "error", error: "服务器响应异常" });
       }
       router.refresh();
     };
-    xhr.onerror = () =>
-      setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, status: "error", error: "网络错误" } : it)));
+    xhr.onerror = () => {
+      settle();
+      update(id, { status: "error", error: "网络错误" });
+    };
+    xhr.onabort = settle;
     xhr.open("POST", "/api/upload");
     xhr.send(form);
   }
+
+  // 调度器：有空闲名额时从 pending 队列启动上传；startedRef 保证任务只启动一次
+  useEffect(() => {
+    if (activeRef.current >= MAX_CONCURRENT) return;
+    const toStart = items.filter((i) => i.status === "pending" && !startedRef.current.has(i.id) && i.file);
+    const slots = MAX_CONCURRENT - activeRef.current;
+    const picked = toStart.slice(0, slots);
+    if (picked.length === 0) return;
+    picked.forEach((it) => startedRef.current.add(it.id));
+    activeRef.current += picked.length;
+    picked.forEach((it) => uploadOne(it.id, it.file!));
+    setItems((prev) => prev.map((p) => (picked.some((t) => t.id === p.id) ? { ...p, status: "uploading" as const } : p)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items]);
 
   function addFiles(files: FileList | File[]) {
     // 允许 type 为空的文件（部分应用拖拽时浏览器识别不出 MIME），由服务端魔数校验兜底
@@ -85,19 +114,16 @@ export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
       toast.error("仅支持图片文件");
       return;
     }
-    const newItems = valid.map((f) => ({ file: f, name: f.name, progress: 0, status: "pending" as const }));
+    const newItems = valid.map((f) => ({
+      id: `u${++seqRef.current}`,
+      file: f,
+      name: f.name,
+      progress: 0,
+      status: "pending" as const,
+    }));
     setItems((prev) => [...prev, ...newItems]);
-    // 并发上传
-    newItems.forEach((item) => {
-      setItems((prev) => {
-        const idx = prev.findIndex((p) => p === item);
-        if (idx >= 0) uploadOne({ ...item, status: "uploading" }, idx);
-        return prev;
-      });
-    });
   }
 
-  // 并发上传辅助：直接按索引逐个触发
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
@@ -231,9 +257,8 @@ export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    const retry = { ...item, status: "uploading" as const, progress: 0 };
-                    setItems((prev) => prev.map((it, idx) => (idx === i ? retry : it)));
-                    uploadOne(retry, i);
+                    startedRef.current.delete(item.id);
+                    update(item.id, { status: "pending", progress: 0, error: undefined });
                   }}
                 >
                   重试
@@ -244,7 +269,13 @@ export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
                 variant="ghost"
                 className="h-7 w-7"
                 aria-label="移除"
-                onClick={() => setItems((prev) => prev.filter((_, idx) => idx !== i))}
+                onClick={() => {
+                  // 上传中先中断请求（onerror 里回收并发名额）
+                  xhrRef.current.get(item.id)?.abort();
+                  xhrRef.current.delete(item.id);
+                  startedRef.current.delete(item.id);
+                  setItems((prev) => prev.filter((it) => it.id !== item.id));
+                }}
               >
                 <X className="h-3.5 w-3.5" />
               </Button>

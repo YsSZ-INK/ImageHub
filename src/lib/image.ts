@@ -77,7 +77,13 @@ export async function processAndStoreImage(
   if (!mime) throw new AppError("不支持的图片格式（仅允许 jpg/jpeg/png/webp/gif/avif）", 415);
 
   const sha256 = createHash("sha256").update(buf).digest("hex");
-  const convertWebp = process.env.CONVERT_TO_WEBP === "true" && (mime === "image/jpeg" || mime === "image/png");
+  const convertWebP = process.env.CONVERT_TO_WEBP === "true" && (mime === "image/jpeg" || mime === "image/png");
+
+  // 元信息：只读元数据不解码像素；按 EXIF 方向换算 rotate 后的显示尺寸（方向 5-8 含 90°/270° 旋转需交换宽高）
+  const srcMeta = await sharp(buf).metadata();
+  const swap = srcMeta.orientation !== undefined && srcMeta.orientation >= 5 && srcMeta.orientation <= 8;
+  const width = swap ? (srcMeta.height ?? 0) : (srcMeta.width ?? 0);
+  const height = swap ? (srcMeta.width ?? 0) : (srcMeta.height ?? 0);
 
   // sharp 默认剥离全部元数据（EXIF/GPS），除非显式 withMetadata
   const pipeline = sharp(buf).rotate(); // rotate 按 EXIF 方向摆正后再剥离
@@ -86,7 +92,7 @@ export async function processAndStoreImage(
   let mainMime: string;
   let ext: string;
 
-  if (convertWebp) {
+  if (convertWebP) {
     mainBuf = await pipeline.webp({ quality: 82 }).toBuffer();
     mainMime = "image/webp";
     ext = "webp";
@@ -101,37 +107,36 @@ export async function processAndStoreImage(
     ext = ALLOWED_MIMES[mime];
   }
 
-  // 元信息（rotate 后的实际显示尺寸）
-  const meta = await sharp(mainBuf).metadata();
-  const width = meta.width ?? 0;
-  const height = meta.height ?? 0;
-
-  // 缩略图：最长边 400px，WebP
-  const thumbBuf =
+  // 缩略图与 blurhash 并行处理（互不依赖）
+  const thumbTask =
     mime === "image/gif"
-      ? await sharp(buf, { animated: false }).resize({ width: 400, withoutEnlargement: true }).webp().toBuffer()
-      : await sharp(mainBuf).resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true }).webp().toBuffer();
-
-  // blurhash 占位图（小尺寸采样）
-  let blurhash: string | null = null;
-  try {
-    const { data, info } = await sharp(mainBuf)
-      .resize(32, 32, { fit: "inside" })
-      .ensureAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    blurhash = encode(new Uint8ClampedArray(data), info.width, info.height, 4, 3);
-  } catch {
-    // blurhash 失败不阻塞上传
-  }
+      ? sharp(buf, { animated: false }).resize({ width: 400, withoutEnlargement: true }).webp().toBuffer()
+      : sharp(mainBuf).resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true }).webp().toBuffer();
+  const blurTask = (async (): Promise<string | null> => {
+    try {
+      // blurhash 占位图（小尺寸采样）
+      const { data, info } = await sharp(mainBuf)
+        .resize(32, 32, { fit: "inside" })
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      return encode(new Uint8ClampedArray(data), info.width, info.height, 4, 3);
+    } catch {
+      return null; // blurhash 失败不阻塞上传
+    }
+  })();
+  const [thumbBuf, blurhash] = await Promise.all([thumbTask, blurTask]);
 
   const storage = await getStorage();
   const rand = randomBytes(4).toString("hex");
   const storageKey = `images/${userId}/${monthKey()}/${sha256.slice(0, 16)}-${rand}.${ext}`;
   const thumbKey = `thumbs/${userId}/${monthKey()}/${sha256.slice(0, 16)}-${rand}.webp`;
 
-  await storage.put(storageKey, mainBuf, { contentType: mainMime });
-  await storage.put(thumbKey, thumbBuf, { contentType: "image/webp" });
+  // 原图与缩略图并行写盘
+  await Promise.all([
+    storage.put(storageKey, mainBuf, { contentType: mainMime }),
+    storage.put(thumbKey, thumbBuf, { contentType: "image/webp" }),
+  ]);
 
   return {
     filename: sanitizeName(originalName),
