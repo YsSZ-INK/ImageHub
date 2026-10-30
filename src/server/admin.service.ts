@@ -53,11 +53,14 @@ export async function adminCreateUser(input: z.infer<typeof adminUserCreateSchem
 }
 
 export async function adminUpdateUser(
+  adminId: string,
   id: string,
   patch: { status?: string; role?: string; storageQuotaGB?: number }
 ) {
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) throw new AppError("用户不存在", 404);
+  // 保护：不能封禁自己，避免把自己锁在后台外面
+  if (patch.status === "BANNED" && id === adminId) throw new AppError("不能封禁自己", 400);
   // 保护：最后一个管理员不能降级，避免后台失去管理能力
   if (patch.role === "USER" && user.role === "ADMIN") {
     const adminCount = await prisma.user.count({ where: { role: "ADMIN" } });

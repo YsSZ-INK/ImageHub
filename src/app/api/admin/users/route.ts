@@ -7,9 +7,11 @@ import { publicUser } from "@/server/user.service";
 export const runtime = "nodejs";
 
 export const GET = handle(async (req: Request) => {
-  await requireApiUser();
+  const viewer = await requireApiUser();
   const url = new URL(req.url);
-  return ok(await adminListUsers(url.searchParams.get("search") ?? undefined));
+  const users = await adminListUsers(url.searchParams.get("search") ?? undefined);
+  // isSelf：标记当前登录管理员自己，用于前端隐藏封禁按钮
+  return ok(users.map((u) => ({ ...u, isSelf: u.id === viewer.id })));
 });
 
 // 创建用户（管理员）

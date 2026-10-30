@@ -19,6 +19,7 @@ type AdminUser = {
   storageUsed: string;
   imageCount: number;
   createdAt: string;
+  isSelf?: boolean;
 };
 
 // 用户管理：搜索、封禁/解封、调整角色与配额
@@ -246,15 +247,28 @@ export function AdminUsersClient() {
                   <td className="p-2.5 text-muted-foreground">{shortDate(u.createdAt)}</td>
                   <td className="p-2.5">
                     <div className="flex gap-1">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={updating === u.id}
-                        onClick={() => update(u.id, { status: u.status === "ACTIVE" ? "BANNED" : "ACTIVE" })}
-                      >
-                        {u.status === "ACTIVE" ? <Ban className="h-3 w-3" /> : <ShieldCheck className="h-3 w-3" />}
-                        {u.status === "ACTIVE" ? "封禁" : "解封"}
-                      </Button>
+                      {/* 不能封禁自己：隐藏按钮 */}
+                      {u.status === "ACTIVE" ? (
+                        !u.isSelf && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={updating === u.id}
+                            onClick={() => update(u.id, { status: "BANNED" })}
+                          >
+                            <Ban className="h-3 w-3" /> 封禁
+                          </Button>
+                        )
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={updating === u.id}
+                          onClick={() => update(u.id, { status: "ACTIVE" })}
+                        >
+                          <ShieldCheck className="h-3 w-3" /> 解封
+                        </Button>
+                      )}
                       <Button
                         size="sm"
                         variant="outline"

@@ -13,6 +13,6 @@ export const PATCH = handle(async (req: Request, { params }: { params: Promise<{
   if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
   const { id } = await params;
   const input = adminUserUpdateSchema.parse(await req.json());
-  const updated = await adminUpdateUser(id, input);
+  const updated = await adminUpdateUser(viewer.id, id, input);
   return ok({ user: publicUser(updated) });
 });
