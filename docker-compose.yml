@@ -38,7 +38,9 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "${PORT:-3000}:3000"
+      # 默认仅绑定本机回环 127.0.0.1：端口不出主机，外网无法直连（Docker 发布端口不走系统防火墙，只能靠绑定地址控制）
+      # 需要外网直接访问时在 .env 设 BIND_IP=0.0.0.0（建议同时用防火墙/安全组限制来源）；反代场景保持默认即可
+      - "${BIND_IP:-127.0.0.1}:${PORT:-3000}:3000"
     volumes:
       - storage_data:/app/storage
     healthcheck:

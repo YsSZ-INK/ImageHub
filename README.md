@@ -84,6 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/YsSZ-INK/ImageHub/main/install.sh |
 
 - 非交互执行：站点地址自动取 `http://服务器公网IP:3000`，`AUTH_SECRET` 与数据库密码均随机生成
 - 需要自定义时先预设变量：`SITE_URL=https://img.example.com PORT=8080 bash install.sh`
+- **端口默认仅绑定 `127.0.0.1`（只有本机能打开）**；要公网直接访问预设 `BIND_IP=0.0.0.0 bash install.sh`，或安装后在 `.env` 修改（见「端口暴露与防火墙」）
 - 重复执行安全：已有 `.env` 时沿用现有配置，不会覆盖密钥
 
 ### 安装（手动，等价步骤）
@@ -104,7 +105,7 @@ docker compose up -d
 curl http://localhost:3000/api/health   # {"ok":true,"db":"up"}
 ```
 
-打开 `http://服务器IP:3000`，**注册的第一个账号自动成为管理员**，随后进入 `/admin` 建议关闭开放注册。
+默认仅本机可访问（`127.0.0.1`）：在这台机器上打开 `http://localhost:3000`，**注册的第一个账号自动成为管理员**，随后进入 `/admin` 建议关闭开放注册。要让其他设备访问，见「端口暴露与防火墙」或「反向代理与 HTTPS」。
 
 ### 可选：启用 Redis
 
@@ -149,12 +150,39 @@ cd ~/ImageHub && docker compose down -v --rmi all; rm -rf ~/ImageHub
 | `SITE_URL` | ✅ | 站点对外地址（用于生成站内链接），如 `https://img.example.com` |
 | `AUTH_SECRET` | ✅ | 会话加密密钥，`openssl rand -base64 32` 生成，≥32 字符 |
 | `DATABASE_URL` | ✅ | 本地开发 `file:./dev.db`；Docker 部署由 compose 注入 PostgreSQL |
+| `BIND_IP` | - | 端口绑定地址，默认 `127.0.0.1` 仅本机；`0.0.0.0` 对外网开放（见「端口暴露与防火墙」） |
+| `PORT` | - | 宿主机监听端口，默认 3000 |
 | `LOCAL_STORAGE_DIR` | - | 本地存储目录，容器内为 `/app/storage`，默认 `./storage` |
 | `MAX_UPLOAD_MB` | - | 单文件大小上限（MB），默认 50 |
 | `CONVERT_TO_WEBP` | - | 是否自动将 jpg/png 转 WebP，默认 false |
 | `REDIS_URL` | - | 可选，配置后限流走 Redis，否则降级为进程内存实现 |
 
 邮件发送：后台「站点设置 → 邮件配置」填写 SMTP 后，验证 / 重置邮件真实发送；未配置时打印到服务端控制台。
+
+## 端口暴露与防火墙
+
+Docker 发布端口**不走系统防火墙**，这是 Docker 的设计而非防火墙失效：
+
+- Linux 上 `ports: "3000:3000"` 会让 Docker 直接在 iptables 的 NAT/DOCKER 链写转发规则，流量不经过 ufw / firewalld 管理的 INPUT 链，所以防火墙规则拦不住它
+- Windows / macOS 的 Docker Desktop 由 `com.docker.backend` 进程代理端口，而该进程安装时已被防火墙放行
+
+因此暴露与否由**绑定地址**决定（`docker-compose.yml` 的 `BIND_IP`，默认 `127.0.0.1`）：
+
+| `BIND_IP` | 效果 | 适用 |
+| --- | --- | --- |
+| `127.0.0.1`（默认） | 端口只在回环监听，**无论防火墙如何，外网都打不开** | 本机使用 / 反向代理（推荐） |
+| `0.0.0.0` | 监听所有网卡，外网可直接访问 | 确认要裸暴露时（建议配防火墙/安全组限源） |
+
+切换方式：编辑 `.env`（或安装时预设环境变量），然后 `docker compose up -d` 重建容器：
+
+```bash
+# 对外网开放
+BIND_IP=0.0.0.0 docker compose up -d
+# 收回仅本机
+BIND_IP=127.0.0.1 docker compose up -d
+```
+
+公网部署推荐保持默认 `127.0.0.1`，用反向代理对外提供 80/443 与 HTTPS，应用端口不出主机。
 
 ## 反向代理与 HTTPS
 

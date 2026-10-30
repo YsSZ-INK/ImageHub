@@ -53,6 +53,9 @@ fi
 ask PORT        "服务端口"            "$DEFAULT_PORT"
 ask SITE_URL    "站点对外访问地址"    "http://$(curl -4 -fsS --max-time 3 https://ifconfig.me 2>/dev/null || echo 127.0.0.1):${PORT}"
 case "$SITE_URL" in http://*|https://*) ;; *) SITE_URL="http://${SITE_URL}" ;; esac
+# 绑定地址：127.0.0.1 仅本机可访问（配合反向代理），0.0.0.0 对外网开放
+# Docker 发布端口不走系统防火墙（iptables DOCKER 链 / Docker Desktop 进程放行），暴露与否只能由绑定地址决定
+ask BIND_IP     "端口绑定地址（127.0.0.1=仅本机，0.0.0.0=对外开放）" "127.0.0.1"
 
 # ---------- 生成密钥 ----------
 gen_key() { openssl rand -hex 32 2>/dev/null || od -An -N16 -tx1 /dev/urandom | tr -d ' \n'; }
@@ -71,6 +74,7 @@ else
 SITE_URL="${SITE_URL}"
 AUTH_SECRET="${AUTH_SECRET}"
 PORT="${PORT}"
+BIND_IP="${BIND_IP}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
 EOF
   log ".env 已生成（AUTH_SECRET 与数据库密码均为随机值）"
@@ -96,6 +100,13 @@ done
 
 log "──────────────────────────────────────────────"
 log "安装完成！访问地址：${SITE_URL}"
+if [ "${BIND_IP:-127.0.0.1}" = "127.0.0.1" ]; then
+  log "当前端口仅绑定本机（127.0.0.1）：只有这台机器能打开，外网无法访问"
+  log "对外网开放：编辑 ${INSTALL_DIR}/.env 设 BIND_IP=0.0.0.0 后执行 docker compose up -d"
+  log "公网部署推荐：保持默认绑定 + 反向代理（Caddy/Nginx）提供 HTTPS"
+else
+  warn "端口已绑定 0.0.0.0，服务直接暴露在所有网卡：请确认防火墙/安全组已限制来源端口"
+fi
 log "注册的第一个账号自动成为管理员，随后到「站点设置」建议关闭开放注册"
 log "更新：cd ${INSTALL_DIR} && docker compose pull web && docker compose up -d"
 log "卸载：cd ${INSTALL_DIR} && docker compose down -v --rmi all; rm -rf ${INSTALL_DIR}"
