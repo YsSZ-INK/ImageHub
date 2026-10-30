@@ -106,7 +106,7 @@ export default async function HomePage() {
                   <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-foreground/5 ring-1 ring-foreground/10">
                     <f.icon className="h-5 w-5" />
                   </span>
-                  <span className="text-[15px]">{f.text}</span>
+                  <span className="text-[0.9375rem]">{f.text}</span>
                 </li>
               ))}
             </ul>

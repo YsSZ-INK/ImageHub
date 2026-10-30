@@ -53,7 +53,7 @@ export async function ConsoleShell({ children }: { children: React.ReactNode }) 
           <div className="flex-1 space-y-4 overflow-y-auto p-3">
             {navGroups.map((group) => (
               <div key={group.label}>
-                <div className="px-3 pb-1 text-[11px] font-medium tracking-widest text-muted-foreground/70">
+                <div className="px-3 pb-1 text-[0.6875rem] font-medium tracking-widest text-muted-foreground/70">
                   {group.label}
                 </div>
                 <SideNav items={group.items} />

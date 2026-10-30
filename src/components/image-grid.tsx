@@ -61,7 +61,7 @@ export function ImageGrid({
           <p className="truncate text-xs text-white">{img.filename}</p>
           <div className="mt-0.5 flex items-center gap-1.5">
             {showVisibility && <VisibilityBadge visibility={img.visibility} />}
-            {showOwner && img.ownerName && <span className="text-[10px] text-white/70">{img.ownerName}</span>}
+            {showOwner && img.ownerName && <span className="text-[0.625rem] text-white/70">{img.ownerName}</span>}
           </div>
         </div>
         <div className="pointer-events-auto shrink-0">

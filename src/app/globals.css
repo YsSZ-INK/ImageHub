@@ -2,6 +2,25 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ===== 大屏自适应缩放 =====
+   全站尺寸均基于 rem（跟随根字号），按视口宽度分档放大根字号，
+   高分屏 / 大窗口下整体 UI 等比变大，普通窗口保持默认不缩放 */
+html {
+  font-size: 16px;
+}
+@media (min-width: 1440px) {
+  html { font-size: 17px; }
+}
+@media (min-width: 1680px) {
+  html { font-size: 18px; }
+}
+@media (min-width: 1920px) {
+  html { font-size: 19px; }
+}
+@media (min-width: 2240px) {
+  html { font-size: 20px; }
+}
+
 :root {
   --background: 40 20% 97%;
   --foreground: 0 0% 9%;
