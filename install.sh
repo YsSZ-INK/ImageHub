@@ -57,6 +57,11 @@ case "$SITE_URL" in http://*|https://*) ;; *) SITE_URL="http://${SITE_URL}" ;; e
 # Docker 发布端口不走系统防火墙（iptables DOCKER 链 / Docker Desktop 进程放行），暴露与否只能由绑定地址决定
 ask BIND_IP     "端口绑定地址（127.0.0.1=仅本机，0.0.0.0=对外开放）" "127.0.0.1"
 
+# 安装目录：交互时询问，非交互（curl|bash）用默认值；可用环境变量 IMAGEHUB_DIR 预设
+INSTALL_DIR="${IMAGEHUB_DIR:-${INSTALL_DIR:-}}"
+ask INSTALL_DIR "安装目录" "$HOME/ImageHub"
+case "$INSTALL_DIR" in "~"*) INSTALL_DIR="${INSTALL_DIR/#\~/$HOME}" ;; esac
+
 # ---------- 生成密钥 ----------
 gen_key() { openssl rand -hex 32 2>/dev/null || od -An -N16 -tx1 /dev/urandom | tr -d ' \n'; }
 AUTH_SECRET="$(gen_key)"

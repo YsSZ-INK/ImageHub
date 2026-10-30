@@ -43,6 +43,30 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
   // 时间筛选（YYYY-MM-DD，空串表示不限）
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [preset, setPreset] = useState<string | null>(null);
+  const fmtLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  // 快捷时间区间：一键选定，免去手动输入日期；再点一次取消
+  const PRESETS: { label: string; days: number }[] = [
+    { label: "今天", days: 0 },
+    { label: "昨天", days: 1 },
+    { label: "近7天", days: 7 },
+    { label: "近30天", days: 30 },
+  ];
+  function applyPreset(p: { label: string; days: number }) {
+    if (preset === p.label) { setFrom(""); setTo(""); setPreset(null); return; }
+    const today = new Date();
+    if (p.days === 1) {
+      // 昨天：单日
+      const y = new Date(today); y.setDate(y.getDate() - 1);
+      const d = fmtLocal(y); setFrom(d); setTo(d);
+    } else {
+      // 今天 / 近N天（含今天）
+      const fromD = new Date(today);
+      if (p.days > 0) fromD.setDate(fromD.getDate() - (p.days - 1));
+      setFrom(fmtLocal(fromD)); setTo(fmtLocal(today));
+    }
+    setPreset(p.label);
+  }
   // 灯箱：{ images, index } 限定在单条动态内切换
   const [preview, setPreview] = useState<{ images: FeedImage[]; index: number } | null>(null);
 
@@ -97,17 +121,35 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
     <div className="mx-auto w-full max-w-3xl space-y-4 xl:max-w-4xl">
       <h1 className="text-xl font-bold">图文动态</h1>
 
-      {/* 时间筛选：按动态发布日期范围过滤 */}
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <CalendarDays className="h-4 w-4 text-muted-foreground" />
-        <Input type="date" className="h-8 w-40" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
-        <span className="text-muted-foreground">至</span>
-        <Input type="date" className="h-8 w-40" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
-        {(from || to) && (
-          <Button variant="outline" size="sm" onClick={() => { setFrom(""); setTo(""); }}>
-            清除筛选
-          </Button>
-        )}
+      {/* 时间筛选：快捷区间一键选择，日期框仅用于自定义范围 */}
+      <div className="space-y-2 text-sm">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <CalendarDays className="mr-1 h-4 w-4 text-muted-foreground" />
+          {PRESETS.map((p) => (
+            <button
+              key={p.label}
+              type="button"
+              className={`h-7 rounded-full border px-3 text-xs transition-colors ${
+                preset === p.label
+                  ? "border-transparent bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+              onClick={() => applyPreset(p)}
+            >
+              {p.label}
+            </button>
+          ))}
+          {(from || to) && (
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => { setFrom(""); setTo(""); setPreset(null); }}>
+              清除
+            </Button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input type="date" className="h-8 w-40" value={from} max={to || undefined} onChange={(e) => { setFrom(e.target.value); setPreset(null); }} />
+          <span className="text-muted-foreground">至</span>
+          <Input type="date" className="h-8 w-40" value={to} min={from || undefined} onChange={(e) => { setTo(e.target.value); setPreset(null); }} />
+        </div>
       </div>
 
       <Composer me={me} onPublished={() => load(null, from, to)} />

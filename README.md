@@ -82,8 +82,9 @@ download 接口始终需要登录，不生成匿名直链 / 签名 URL。
 curl -fsSL https://raw.githubusercontent.com/YsSZ-INK/ImageHub/main/install.sh | bash
 ```
 
-- 非交互执行：站点地址自动取 `http://服务器公网IP:3000`，`AUTH_SECRET` 与数据库密码均随机生成
-- 需要自定义时先预设变量：`SITE_URL=https://img.example.com PORT=8080 bash install.sh`
+- 非交互执行：站点地址自动取 `http://服务器公网IP:3000`，`AUTH_SECRET` 与数据库密码均随机生成，安装目录默认 `~/ImageHub`
+- 交互执行（直接运行脚本）会依次询问：服务端口、站点地址、端口绑定地址、**安装目录**（输入 `~` 开头路径会自动展开）
+- 需要自定义时先预设变量：`SITE_URL=https://img.example.com PORT=8080 INSTALL_DIR=/opt/ImageHub bash install.sh`
 - **端口默认仅绑定 `127.0.0.1`（只有本机能打开）**；要公网直接访问预设 `BIND_IP=0.0.0.0 bash install.sh`，或安装后在 `.env` 修改（见「端口暴露与防火墙」）
 - 重复执行安全：已有 `.env` 时沿用现有配置，不会覆盖密钥
 

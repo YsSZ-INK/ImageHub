@@ -147,7 +147,8 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
           {/* 带复选框的网格 */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
             {items.map((img, idx) => (
-              <div key={img.id} className="group relative overflow-hidden rounded-lg border border-border">
+              <div key={img.id} className="group overflow-hidden rounded-lg border border-border">
+                <div className="relative">
                 {img.kind === "video" ? (
                   <>
                     <video
@@ -211,8 +212,22 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
                 <p className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent p-1.5 text-xs text-white opacity-0 group-hover:opacity-100">
                   {img.filename}
                 </p>
-              </div>
-            ))}
+                </div>
+                {/* 链接条：每张图片常驻显示外链，点击复制完整地址 */}
+              <button
+                type="button"
+                title={`点击复制外链：/api/images/${img.id}/raw`}
+                className="flex w-full items-center gap-1.5 border-t bg-muted/50 px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  copyLink(img.id);
+                }}
+              >
+                <Link2 className="h-3 w-3 shrink-0" />
+                <span className="truncate">/api/images/{img.id}/raw</span>
+              </button>
+            </div>
+          ))}
           </div>
 
           {/* 翻页：支持输入页码跳转 */}
