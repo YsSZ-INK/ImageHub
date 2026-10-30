@@ -28,7 +28,7 @@ export type ImageDTO = {
   ownerName?: string;
 };
 
-function toDTO(img: Image & { user?: { name: string } }): ImageDTO {
+export function toDTO(img: Image & { user?: { name: string } }): ImageDTO {
   return {
     id: img.id,
     filename: img.filename,
@@ -66,14 +66,15 @@ export async function getImageForView(id: string, viewer: Viewer | null, include
 // ============ 上传（含配额、去重） ============
 export async function uploadImages(
   user: User,
-  files: { buf: Buffer; name: string; contentType: string }[]
+  files: { buf: Buffer; name: string; contentType: string }[],
+  opts?: { albumId?: string | null }
 ): Promise<{ results: (ImageDTO | { name: string; error: string })[]; deduped: number }> {
   const results: (ImageDTO | { name: string; error: string })[] = [];
   let deduped = 0;
 
   for (const f of files) {
     try {
-      const dto = await uploadOne(user, f);
+      const dto = await uploadOne(user, f, opts?.albumId ?? null);
       results.push(dto);
       if ("deduped" in dto && dto.deduped) deduped++;
     } catch (err) {
@@ -85,9 +86,19 @@ export async function uploadImages(
   return { results, deduped };
 }
 
+// 相册归属校验（上传/更新共用）：相册必须存在且属于本人（管理员可操作任意相册）
+export async function assertAlbumAccess(viewer: Viewer, albumId: string | null) {
+  if (!albumId) return;
+  const album = await prisma.album.findUnique({ where: { id: albumId } });
+  if (!album || (album.userId !== viewer.id && viewer.role !== "ADMIN")) {
+    throw new AppError("相册不存在或无权访问", 403);
+  }
+}
+
 async function uploadOne(
   user: User,
-  f: { buf: Buffer; name: string; contentType: string }
+  f: { buf: Buffer; name: string; contentType: string },
+  albumId: string | null
 ): Promise<ImageDTO & { deduped?: boolean }> {
   // sha256 去重：同用户重复上传直接复用
   const { createHash } = await import("crypto");
@@ -95,7 +106,18 @@ async function uploadOne(
   const dup = await prisma.image.findFirst({
     where: { userId: user.id, sha256, deletedAt: null },
   });
-  if (dup) return { ...toDTO(dup), deduped: true };
+  if (dup) {
+    // 重复上传复用已有记录；本次指定了相册则把记录挂过去
+    if (albumId && dup.albumId !== albumId) {
+      const updated = await prisma.image.update({
+        where: { id: dup.id },
+        data: { albumId },
+        include: { user: { select: { name: true } } },
+      });
+      return { ...toDTO(updated), deduped: true };
+    }
+    return { ...toDTO(dup), deduped: true };
+  }
 
   // 配额校验
   const used = Number(user.storageUsed);
@@ -118,6 +140,7 @@ async function uploadOne(
         height: processed.height,
         sha256: processed.sha256,
         blurhash: processed.blurhash,
+        albumId,
       },
       include: { user: { select: { name: true } } },
     }),
@@ -335,7 +358,7 @@ export async function batchImages(viewer: Viewer, input: z.infer<typeof batchAct
 }
 
 // ============ 相册 ============
-function makeSlug(name: string) {
+export function makeSlug(name: string) {
   const base = name.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-").replace(/^-+|-+$/g, "") || "album";
   return `${base}-${Math.random().toString(36).slice(2, 7)}`;
 }

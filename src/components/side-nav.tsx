@@ -10,6 +10,7 @@ import {
   UploadCloud,
   Folder,
   Trash2,
+  Newspaper,
   type LucideIcon,
 } from "lucide-react";
 
@@ -22,6 +23,7 @@ const ICONS: Record<string, LucideIcon> = {
   upload: UploadCloud,
   folder: Folder,
   trash: Trash2,
+  news: Newspaper,
 };
 
 type NavItem = {

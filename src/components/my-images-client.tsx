@@ -210,7 +210,7 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
           <DialogHeader>
             <DialogTitle>上传图片</DialogTitle>
           </DialogHeader>
-          <UploadDropzone onSettled={() => loadPage(1)} />
+          <UploadDropzone albums={albums} onSettled={() => loadPage(1)} />
         </DialogContent>
       </Dialog>
 

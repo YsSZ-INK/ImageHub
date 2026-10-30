@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { handle, assertSameOrigin, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
 import { getSettings, envMaxUploadMB } from "@/lib/settings";
-import { uploadImages } from "@/server/image.service";
+import { uploadImages, assertAlbumAccess } from "@/server/image.service";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -24,6 +24,11 @@ export const POST = handle(async (req: Request) => {
   if (files.length === 0) throw new AppError("缺少文件", 400);
   if (files.length > 20) throw new AppError("单次最多上传 20 个文件", 400);
 
+  // 可选相册：上传后挂到指定相册（须属于本人）
+  const albumIdRaw = form.get("albumId");
+  const albumId = typeof albumIdRaw === "string" && albumIdRaw ? albumIdRaw : null;
+  await assertAlbumAccess(user, albumId);
+
   const payloads: { buf: Buffer; name: string; contentType: string }[] = [];
   for (const f of files) {
     if (f.size > maxBytes) throw new AppError(`文件 ${f.name} 超过大小上限 ${maxMB}MB`, 413);
@@ -32,7 +37,7 @@ export const POST = handle(async (req: Request) => {
     payloads.push({ buf, name: f.name || "image", contentType: f.type });
   }
 
-  const { results } = await uploadImages(user, payloads);
+  const { results } = await uploadImages(user, payloads, { albumId });
   const successCount = results.filter((r) => !("error" in r)).length;
   return NextResponse.json({ ok: true, data: { results, successCount } }, { status: successCount > 0 ? 201 : 400 });
 });

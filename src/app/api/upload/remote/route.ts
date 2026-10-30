@@ -1,6 +1,6 @@
 import { handle, assertSameOrigin, ok, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
-import { uploadImages } from "@/server/image.service";
+import { uploadImages, assertAlbumAccess } from "@/server/image.service";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -14,8 +14,9 @@ export const POST = handle(async (req: Request) => {
   const rl = await rateLimit(`remote:${user.id}`, 10, 60_000);
   if (!rl.success) throw new AppError("抓取过于频繁", 429);
 
-  const { url } = (await req.json()) as { url?: string };
+  const { url, albumId } = (await req.json()) as { url?: string; albumId?: string };
   if (!url || !/^https?:\/\//i.test(url)) throw new AppError("URL 不合法", 400);
+  await assertAlbumAccess(user, albumId ?? null);
 
   // 禁止访问内网地址
   let parsed: URL;
@@ -51,7 +52,7 @@ export const POST = handle(async (req: Request) => {
   if (arr.byteLength > 30 * 1024 * 1024) throw new AppError("远程文件过大（上限 30MB）", 413);
 
   const name = decodeURIComponent(parsed.pathname.split("/").pop() || "remote-image");
-  const { results } = await uploadImages(user, [{ buf: Buffer.from(arr), name, contentType }]);
+  const { results } = await uploadImages(user, [{ buf: Buffer.from(arr), name, contentType }], { albumId: albumId ?? null });
   const first = results[0];
   if (!first || "error" in first) throw new AppError("error" in first ? first.error : "抓取失败", 400);
   return ok(first, 201);

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { UploadCloud, LinkIcon, X, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 type UploadState = {
@@ -22,13 +22,15 @@ const MAX_CONCURRENT = 2;
 
 // 上传组件：拖拽 / 点击选择 / 剪贴板粘贴 / URL 远程抓取；受控并发 + 进度条 + 失败重试
 // onSettled：本批上传全部结束（成功或失败）时触发一次，用于刷新外部列表
-export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
+// 传入 albums 时显示「上传到相册」下拉，选中的相册随本批上传一并提交
+export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; albums?: { id: string; name: string }[] }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [items, setItems] = useState<UploadState[]>([]);
   const [remoteUrl, setRemoteUrl] = useState("");
   const [fetching, setFetching] = useState(false);
+  const [albumId, setAlbumId] = useState("");
 
   const seqRef = useRef(0);
   const activeRef = useRef(0);
@@ -54,6 +56,7 @@ export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
     xhrRef.current.set(id, xhr);
     const form = new FormData();
     form.append("file", file);
+    if (albumId) form.append("albumId", albumId);
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
@@ -143,7 +146,7 @@ export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
       const res = await fetch("/api/upload/remote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, ...(albumId ? { albumId } : {}) }),
       });
       const json = await res.json();
       if (json.ok) {
@@ -160,6 +163,19 @@ export function UploadDropzone({ onSettled }: { onSettled?: () => void }) {
 
   return (
     <div className="space-y-4" onPaste={handlePaste} tabIndex={0}>
+      {albums && albums.length > 0 && (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="shrink-0 text-muted-foreground">上传到相册</span>
+          <Select value={albumId} onChange={(e) => setAlbumId(e.target.value)} className="flex-1">
+            <option value="">不归入相册</option>
+            {albums.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
       <div
         role="button"
         aria-label="上传图片"

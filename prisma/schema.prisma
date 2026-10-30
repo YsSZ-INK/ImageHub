@@ -25,6 +25,7 @@ model User {
 
   images    Image[]
   albums    Album[]
+  posts     Post[]
   apiTokens ApiToken[]
   tokens    Token[]
 }
@@ -43,16 +44,32 @@ model Image {
   blurhash   String?
   visibility String    @default("PUBLIC") // PUBLIC | PRIVATE | UNLISTED（均仅登录用户可达）
   albumId    String?
+  postId     String? // 关联的图文动态（发布到动态时挂上）
   deletedAt  DateTime? // 软删除，回收站保留 30 天
   createdAt  DateTime  @default(now())
 
   user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   album    Album?     @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  post     Post?      @relation(fields: [postId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
   @@index([sha256])
   @@index([visibility, createdAt])
   @@index([albumId])
+  @@index([postId])
+}
+
+// 图文动态（朋友圈式 feed：文字 + 多图）
+model Post {
+  id        String   @id @default(cuid())
+  userId    String
+  caption   String   @default("")
+  createdAt DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images Image[]
+
+  @@index([createdAt])
 }
 
 model Album {

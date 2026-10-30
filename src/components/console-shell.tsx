@@ -18,7 +18,10 @@ const MY_GROUPS: NavGroup[] = [
   },
   {
     label: "公共",
-    items: [{ href: "/gallery", label: "公共画廊", icon: "images" }],
+    items: [
+      { href: "/gallery", label: "公共画廊", icon: "images" },
+      { href: "/feed", label: "图文动态", icon: "news" },
+    ],
   },
 ];
 

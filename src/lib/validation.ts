@@ -63,6 +63,12 @@ export const albumUpdateSchema = z.object({
   coverImageId: z.string().nullable().optional(),
 });
 
+// 图文动态：文字 + 1~9 张图（朋友圈式九宫格）
+export const postCreateSchema = z.object({
+  caption: z.string().max(1000, "文字最长 1000 字").default(""),
+  imageIds: z.array(z.string().min(1)).min(1, "至少选择一张图片").max(9, "最多 9 张图片"),
+});
+
 export const adminUserUpdateSchema = z.object({
   status: z.enum(["ACTIVE", "BANNED"]).optional(),
   role: z.enum(["USER", "ADMIN"]).optional(),
