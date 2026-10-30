@@ -85,6 +85,19 @@ export const adminSettingsSchema = z.object({
   siteName: z.string().min(1).max(50),
   allowRegister: z.boolean(),
   maxUploadMB: z.number().min(1).max(512),
+  // 存储驱动：local 本地磁盘 | r2 Cloudflare R2（写入桶由 r2UploadSlot 指定）
+  storageDriver: z.enum(["local", "r2"]),
+  r2Slots: z
+    .array(
+      z.object({
+        accountId: z.string().max(64).trim(),
+        accessKeyId: z.string().max(128).trim(),
+        secretAccessKey: z.string().max(128),
+        bucket: z.string().max(128).trim(),
+      })
+    )
+    .max(8),
+  r2UploadSlot: z.number().int().min(0).max(7),
   // 邮件（SMTP）配置：host 为空表示未配置；端口 0 表示未设置
   smtpHost: z.string().max(255).trim(),
   smtpPort: z.number().int().min(0).max(65535),

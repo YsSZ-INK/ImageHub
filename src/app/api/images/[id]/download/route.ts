@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { handle, AppError } from "@/lib/api";
 import { getCurrentUser } from "@/lib/session";
 import { getImageForView } from "@/server/image.service";
-import { getStorage } from "@/lib/storage";
+import { getStorageFor } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -15,7 +15,7 @@ export const GET = handle(async (_req: Request, { params }: { params: Promise<{ 
   const img = await getImageForView(id, viewer);
   let buf: Buffer;
   try {
-    buf = await (await getStorage()).get(img.storageKey);
+    buf = await (await getStorageFor(img.storage)).get(img.storageKey);
   } catch {
     throw new AppError("文件缺失", 404);
   }

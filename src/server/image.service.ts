@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
-import { getStorage } from "@/lib/storage";
+import { getStorageFor } from "@/lib/storage";
 import { processAndStoreImage, processAndStoreVideo, detectVideoMime } from "@/lib/image";
 import type { User, Image } from "@prisma/client";
 import type { z } from "zod";
@@ -161,6 +161,7 @@ async function uploadOne(
         filename: processed.filename,
         storageKey: processed.storageKey,
         thumbKey: processed.thumbKey,
+        storage: processed.storage,
         mimeType: processed.mimeType,
         size: processed.size,
         width: processed.width,
@@ -319,10 +320,10 @@ export async function restoreImage(id: string, viewer: Viewer) {
   return prisma.image.update({ where: { id }, data: { deletedAt: null } });
 }
 
-// 彻底删除：同时删除存储对象、扣减配额
+// 彻底删除：同时删除存储对象（按记录的实际存放位置）、扣减配额
 export async function purgeImage(id: string, viewer: Viewer) {
   const img = await assertOwnership(id, viewer);
-  const storage = await getStorage();
+  const storage = await getStorageFor(img.storage);
   await clearAlbumCovers([id]);
   await prisma.image.delete({ where: { id } });
   await Promise.allSettled([storage.delete(img.storageKey), storage.delete(img.thumbKey)]);

@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import { createHash, randomBytes } from "crypto";
 import { encode } from "blurhash";
-import { getStorage } from "@/lib/storage";
+import { getStorageFor, getLocalStorage, getUploadMarker } from "@/lib/storage";
 import { AppError } from "@/lib/api";
 
 // 允许的图片类型白名单
@@ -76,6 +76,8 @@ export type ProcessedUpload = {
   filename: string;
   storageKey: string;
   thumbKey: string;
+  // 文件实际写入的存储驱动（local | r2），随上传记录到 Image.storage
+  storage: string;
   mimeType: string;
   size: number;
   width: number;
@@ -159,12 +161,14 @@ export async function processAndStoreImage(
   })();
   const [thumbBuf, blurhash] = await Promise.all([thumbTask, blurTask]);
 
-  const storage = await getStorage();
+  // 按站点设置的存储位置写入（新上传都进当前目标），并记录位置到 Image.storage（local 或 r2:<桶下标>）
+  const marker = await getUploadMarker();
+  const storage = await getStorageFor(marker);
   const rand = randomBytes(4).toString("hex");
   const storageKey = `images/${userId}/${monthKey()}/${sha256.slice(0, 16)}-${rand}.${ext}`;
   const thumbKey = `thumbs/${userId}/${monthKey()}/${sha256.slice(0, 16)}-${rand}.webp`;
 
-  // 原图与缩略图并行写盘
+  // 原图与缩略图并行写入
   await Promise.all([
     storage.put(storageKey, mainBuf, { contentType: mainMime }),
     storage.put(thumbKey, thumbBuf, { contentType: "image/webp" }),
@@ -174,6 +178,7 @@ export async function processAndStoreImage(
     filename: sanitizeName(originalName),
     storageKey,
     thumbKey,
+    storage: marker,
     mimeType: mainMime,
     size: mainBuf.length,
     width,
@@ -196,7 +201,8 @@ export async function processAndStoreVideo(
   if (!mime) throw new AppError("不支持的视频格式（仅允许 mp4/webm/mov/mkv）", 415);
 
   const sha256 = createHash("sha256").update(buf).digest("hex");
-  const storage = await getStorage();
+  const marker = await getUploadMarker();
+  const storage = await getStorageFor(marker);
   const rand = randomBytes(4).toString("hex");
   const ext = ALLOWED_VIDEO_MIMES[mime];
   const storageKey = `videos/${userId}/${monthKey()}/${sha256.slice(0, 16)}-${rand}.${ext}`;
@@ -206,6 +212,7 @@ export async function processAndStoreVideo(
     filename: sanitizeName(originalName),
     storageKey,
     thumbKey: "",
+    storage: marker,
     mimeType: mime,
     size: buf.length,
     width: 0,
@@ -225,6 +232,7 @@ export async function processAndStoreAvatar(buf: Buffer, userId: string): Promis
     .webp()
     .toBuffer();
   const key = `avatars/${userId}.webp`;
-  await (await getStorage()).put(key, out, { contentType: "image/webp" });
+  // 头像固定存本地磁盘（体积小，不参与 R2 迁移，读取无需按记录区分驱动）
+  await (await getLocalStorage()).put(key, out, { contentType: "image/webp" });
   return key;
 }

@@ -1,8 +1,11 @@
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
+import { r2SlotLabel } from "@/lib/storage";
+import { prisma } from "@/lib/db";
 import { ConsoleTopBar, type NavGroup } from "@/components/console-topbar";
 import { SideNav } from "@/components/side-nav";
 import { QuotaBar } from "@/components/quota-bar";
+import { R2UsageCard } from "@/components/r2-usage-card";
 import { InkBackdrop } from "@/components/ink-theme";
 
 // icon 为字符串名，由 SideNav 客户端组件映射（图标组件不能跨 RSC 边界传递）
@@ -40,6 +43,14 @@ export async function ConsoleShell({ children }: { children: React.ReactNode }) 
   const user = await requireUser();
   const settings = await getSettings();
 
+  // 每个配置完整的 R2 桶槽位，底部各显示一张站点级存储用量卡片（R2 弹性容量，只显示已用）
+  const r2Slots = settings.r2Slots
+    .map((cfg, i) => ({ cfg, i }))
+    .filter(({ cfg }) => cfg.accountId && cfg.accessKeyId && cfg.secretAccessKey && cfg.bucket);
+  const r2Aggs = await Promise.all(
+    r2Slots.map(({ i }) => prisma.image.aggregate({ _sum: { size: true }, _count: true, where: { storage: `r2:${i}` } }))
+  );
+
   const navGroups = user.role === "ADMIN" ? [...MY_GROUPS, ADMIN_GROUP] : MY_GROUPS;
   const flatItems = navGroups.flatMap((g) => g.items);
 
@@ -62,6 +73,16 @@ export async function ConsoleShell({ children }: { children: React.ReactNode }) 
           </div>
           <div className="border-t border-foreground/10 p-3">
             <QuotaBar used={Number(user.storageUsed)} quota={Number(user.storageQuota)} />
+            {r2Slots.map(({ i }, n) => (
+              <R2UsageCard
+                key={i}
+                marker={`r2:${i}`}
+                label={r2SlotLabel(i)}
+                used={Number(r2Aggs[n]._sum.size ?? 0)}
+                count={r2Aggs[n]._count}
+                isAdmin={user.role === "ADMIN"}
+              />
+            ))}
           </div>
         </aside>
         <main className="min-w-0 flex-1 p-4 md:p-6">

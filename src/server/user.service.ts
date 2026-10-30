@@ -3,7 +3,7 @@ import { createHash, randomBytes } from "crypto";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
 import { getMailer } from "@/lib/mailer";
-import { getStorage } from "@/lib/storage";
+import { getStorageFor, getLocalStorage } from "@/lib/storage";
 import { processAndStoreAvatar } from "@/lib/image";
 import type { User } from "@prisma/client";
 import type { z } from "zod";
@@ -124,7 +124,8 @@ export async function getAvatar(userId: string): Promise<{ buf: Buffer; contentT
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user?.avatarUrl) return null;
   try {
-    const buf = await (await getStorage()).get(`avatars/${userId}.webp`);
+    // 头像固定存本地磁盘
+    const buf = await (await getLocalStorage()).get(`avatars/${userId}.webp`);
     return { buf, contentType: "image/webp" };
   } catch {
     return null;
@@ -134,12 +135,22 @@ export async function getAvatar(userId: string): Promise<{ buf: Buffer; contentT
 // ============ 账号注销：级联删除图片、相册与存储对象 ============
 export async function deleteAccount(user: User) {
   const images = await prisma.image.findMany({ where: { userId: user.id } });
-  const storage = await getStorage();
-  const keys = images.flatMap((i) => [i.storageKey, i.thumbKey]);
+  // 按记录的实际存放位置分组删除（不同图片可能存放在不同驱动）
+  const byDriver = new Map<string, string[]>();
+  for (const i of images) {
+    const keys = byDriver.get(i.storage) ?? [];
+    keys.push(i.storageKey, ...(i.thumbKey ? [i.thumbKey] : []));
+    byDriver.set(i.storage, keys);
+  }
   await prisma.user.delete({ where: { id: user.id } }); // 级联删除 Image/Album/Token
   // 存储删除放事务外，尽力而为
-  await Promise.allSettled(keys.map((k) => storage.delete(k)));
-  await storage.delete(`avatars/${user.id}.webp`).catch(() => {});
+  for (const [driver, keys] of byDriver) {
+    const storage = await getStorageFor(driver).catch(() => null);
+    if (!storage) continue;
+    await Promise.allSettled(keys.map((k) => storage.delete(k)));
+  }
+  const local = await getLocalStorage();
+  await local.delete(`avatars/${user.id}.webp`).catch(() => {});
 }
 
 export function publicUser(u: User) {

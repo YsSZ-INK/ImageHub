@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { handle, AppError } from "@/lib/api";
 import { getCurrentUser } from "@/lib/session";
 import { getImageForView } from "@/server/image.service";
-import { getStorage } from "@/lib/storage";
+import { getStorageFor } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -16,7 +16,8 @@ export const runtime = "nodejs";
 async function serveFile(req: Request, id: string, kind: "raw" | "thumb", download = false) {
   const viewer = await getCurrentUser();
   const img = await getImageForView(id, viewer);
-  const storage = await getStorage();
+  // 按记录的实际存放位置取文件（local / r2）
+  const storage = await getStorageFor(img.storage);
   const key = kind === "thumb" ? img.thumbKey : img.storageKey;
   let buf: Buffer;
   try {

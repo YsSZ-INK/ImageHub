@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
-import { getStorage } from "@/lib/storage";
+import { getStorageFor } from "@/lib/storage";
 import { deleteAccount } from "@/server/user.service";
 import type { z } from "zod";
 import type { adminUserCreateSchema } from "@/lib/validation";
@@ -131,7 +131,8 @@ export async function adminTakedownImage(id: string) {
 export async function adminPurgeImage(id: string) {
   const img = await prisma.image.findUnique({ where: { id } });
   if (!img) throw new AppError("图片不存在", 404);
-  const storage = await getStorage();
+  // 按记录的实际存放位置删除（local / r2）
+  const storage = await getStorageFor(img.storage);
   await prisma.image.delete({ where: { id } });
   await Promise.allSettled([storage.delete(img.storageKey), storage.delete(img.thumbKey)]);
   await prisma.user
