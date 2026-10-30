@@ -9,12 +9,11 @@
 
 - [功能总览](#功能总览)
 - [安全模型](#安全模型)
-- [快速部署（Docker）](#快速部署docker)
+- [安装 / 更新 / 卸载](#安装--更新--卸载)
 - [环境变量](#环境变量)
 - [反向代理与 HTTPS](#反向代理与-https)
 - [数据持久化与备份](#数据持久化与备份)
 - [忘记密码](#忘记密码)
-- [一键卸载](#一键卸载)
 - [本地开发](#本地开发)
 - [双 Schema 说明](#双-schema-说明)
 - [CI/CD](#cicd)
@@ -71,11 +70,11 @@ download 接口始终需要登录，不生成匿名直链 / 签名 URL。
 - 仅 `PUBLIC` / `UNLISTED` 的 raw/thumb 对匿名放开并携带 `Cache-Control: public` 以启用 CDN 与浏览器缓存；`PRIVATE` 与 download 始终需要登录
 - 上传经限流 + MIME + 魔数双校验；同源校验（`assertSameOrigin`）防 CSRF
 
-## 快速部署（Docker）
+## 安装 / 更新 / 卸载
 
 只需 `postgres` + `web` 两个容器，web 镜像由 GitHub Actions 自动构建并发布到 GHCR，**无需在服务器上构建**。
 
-### 一键安装
+### 安装（一键，推荐）
 
 在服务器上执行一条命令（自动安装 Docker、生成随机密钥、拉取镜像并启动）：
 
@@ -87,7 +86,7 @@ curl -fsSL https://raw.githubusercontent.com/YsSZ-INK/ImageHub/main/install.sh |
 - 需要自定义时先预设变量：`SITE_URL=https://img.example.com PORT=8080 bash install.sh`
 - 重复执行安全：已有 `.env` 时沿用现有配置，不会覆盖密钥
 
-### 手动部署（等价步骤）
+### 安装（手动，等价步骤）
 
 ```bash
 # 1. 拉取代码
@@ -107,12 +106,6 @@ curl http://localhost:3000/api/health   # {"ok":true,"db":"up"}
 
 打开 `http://服务器IP:3000`，**注册的第一个账号自动成为管理员**，随后进入 `/admin` 建议关闭开放注册。
 
-### 升级版本
-
-```bash
-cd ~/ImageHub && docker compose pull web && docker compose up -d
-```
-
 ### 可选：启用 Redis
 
 限流默认使用进程内存实现，单实例足够；多实例或需要重启后限流计数不丢失时可启用：
@@ -122,6 +115,30 @@ docker compose --profile redis up -d
 ```
 
 并在 `.env` 中设置 `REDIS_URL=redis://redis:6379`。
+
+### 更新
+
+镜像由 CI 自动构建发布，服务器上拉取新镜像重启即可（数据卷不受影响）：
+
+```bash
+cd ~/ImageHub && docker compose pull web && docker compose up -d
+```
+
+### 卸载
+
+在项目目录执行一条命令，停止并删除容器、数据卷、镜像与项目文件：
+
+```bash
+cd ~/ImageHub && docker compose down -v --rmi all; rm -rf ~/ImageHub
+```
+
+说明：
+
+- `down -v`：停止并删除容器，同时删除 `imagehub_postgres_data`（用户与图片元数据）和 `imagehub_storage_data`（图片文件），**不可恢复**
+- `--rmi all`：顺带删除本 compose 拉取的镜像（应用镜像、postgres、redis；如其他项目共用同一镜像会被一并删除）
+- `rm -rf`：删除项目目录（含 `.env` 与 `docker-compose.yml`）
+
+> 如需保留数据，卸载前先按「数据持久化与备份」章节备份两个数据卷。
 
 ## 环境变量
 
@@ -208,22 +225,6 @@ docker compose exec postgres psql -U imagehub -d imagehub \
 ```
 
 日常改密码直接在「个人中心 → 修改密码」操作即可。
-
-## 一键卸载
-
-在项目目录执行一条命令，停止并删除容器、数据卷、镜像与项目文件：
-
-```bash
-cd ~/ImageHub && docker compose down -v --rmi all; rm -rf ~/ImageHub
-```
-
-说明：
-
-- `down -v`：停止并删除容器，同时删除 `imagehub_postgres_data`（用户与图片元数据）和 `imagehub_storage_data`（图片文件），**不可恢复**
-- `--rmi all`：顺带删除本 compose 拉取的镜像（应用镜像、postgres、redis；如其他项目共用同一镜像会被一并删除）
-- `rm -rf`：删除项目目录（含 `.env` 与 `docker-compose.yml`）
-
-> 如需保留数据，卸载前先按「数据持久化与备份」章节备份两个数据卷。
 
 ## 本地开发（无需 Docker）
 
