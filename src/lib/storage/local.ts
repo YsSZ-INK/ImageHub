@@ -2,12 +2,17 @@ import { promises as fs } from "fs";
 import path from "path";
 import type { PutOptions, Storage } from "./index";
 
+// 存储根目录（备份/还原需要直接访问文件系统）
+export function storageRoot(): string {
+  return path.resolve(process.cwd(), process.env.LOCAL_STORAGE_DIR ?? "./storage");
+}
+
 // 本地磁盘存储实现（开发预览 / 单机部署）
 export class LocalStorage implements Storage {
   private base: string;
 
   constructor() {
-    this.base = path.resolve(process.cwd(), process.env.LOCAL_STORAGE_DIR ?? "./storage");
+    this.base = storageRoot();
   }
 
   private resolve(key: string): string {

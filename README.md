@@ -118,13 +118,42 @@ docker compose --profile redis up -d
 
 并在 `.env` 中设置 `REDIS_URL=redis://redis:6379`。
 
+### 管理脚本（推荐）
+
+安装后（install.sh 会自动下载到安装目录），在服务器上进入安装目录执行：
+
+```bash
+cd ~/ImageHub && bash manage.sh
+```
+
+交互菜单覆盖日常运维，也支持子命令直达（如 `bash manage.sh update`）：
+
+| 菜单 | 功能 |
+| --- | --- |
+| 1 | 更新并清理旧镜像（pull + up -d + image prune） |
+| 2 | 卸载（双重确认，可选保留 backups/） |
+| 3 | 更改端口（自动改 `.env` 并同步 `SITE_URL` 中的端口，重建容器） |
+| 4 | 重置用户密码（邮箱定位，支持随机生成新密码） |
+| 5 | 设为 / 取消管理员 |
+| 6 | 服务 启动 / 停止 / 重启 |
+| 7 | 查看实时日志 |
+| 8 | 备份数据（数据库 pg_dump + 存储卷打包，存入 `backups/`） |
+| 9 | 还原数据（从脚本生成的备份回滚） |
+| 10 | 端口对外开放 / 仅本机 切换（改 `BIND_IP`） |
+| 11 | 清理悬空镜像、查看 Docker 磁盘占用 |
+| 12 | 站点信息（地址 / 绑定 / 容器状态 / 存储占用） |
+
+> 老版本安装的站点可手动补拉一次：`cd ~/ImageHub && curl -fsSL https://raw.githubusercontent.com/YsSZ-INK/ImageHub/main/manage.sh -o manage.sh && chmod +x manage.sh`
+
 ### 更新
 
 镜像由 CI 自动构建发布，服务器上拉取新镜像重启即可（数据卷不受影响）：
 
 ```bash
-cd ~/ImageHub && docker compose pull web && docker compose up -d
+cd ~/ImageHub && docker compose pull web && docker compose up -d && docker image prune -f
 ```
+
+> 末尾的 `docker image prune -f` 清理被替换下来的旧版本悬空镜像——每次 `pull` 都会留下一个约几百 MB 的旧镜像，Docker 不会自动删除，长期不清理会持续吃掉磁盘空间。该命令只删无标签镜像，不影响运行中的容器与数据卷。
 
 ### 卸载
 

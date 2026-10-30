@@ -1,6 +1,10 @@
 # syntax=docker/dockerfile:1
 # 多阶段构建：deps → build → runner
 
+# 构建缓存标记：CI 传入 BUILDKIT_INLINE_CACHE=1，配合 cache-to type=inline
+# 将层缓存清单内联进发布镜像，后续构建（含 VPS 本地 build）可从 ghcr 直接复用缓存层
+ARG BUILDKIT_INLINE_CACHE=1
+
 FROM node:22-alpine AS base
 RUN apk add --no-cache libc6-compat openssl
 

@@ -85,8 +85,9 @@ EOF
   log ".env 已生成（AUTH_SECRET 与数据库密码均为随机值）"
 fi
 
-log "拉取 docker-compose.yml …"
+log "拉取 docker-compose.yml 与管理脚本 …"
 curl -fsSL "$REPO_RAW/docker-compose.yml" -o docker-compose.yml
+curl -fsSL "$REPO_RAW/manage.sh" -o manage.sh && chmod +x manage.sh
 
 # ---------- 启动 ----------
 log "拉取镜像并启动（首次启动自动执行数据库迁移）…"
@@ -113,6 +114,7 @@ else
   warn "端口已绑定 0.0.0.0，服务直接暴露在所有网卡：请确认防火墙/安全组已限制来源端口"
 fi
 log "注册的第一个账号自动成为管理员，随后到「站点设置」建议关闭开放注册"
-log "更新：cd ${INSTALL_DIR} && docker compose pull web && docker compose up -d"
+log "更新：cd ${INSTALL_DIR} && docker compose pull web && docker compose up -d && docker image prune -f"
+log "管理：bash ${INSTALL_DIR}/manage.sh（更新/卸载/改端口/重置密码/备份还原等菜单）"
 log "卸载：cd ${INSTALL_DIR} && docker compose down -v --rmi all; rm -rf ${INSTALL_DIR}"
 log "──────────────────────────────────────────────"

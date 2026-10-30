@@ -89,18 +89,22 @@ export async function adminUpdateUser(
   });
 }
 
-// 图片审核列表（全站）
-export async function adminListImages(cursor?: string, take = 24) {
-  const rows = await prisma.image.findMany({
-    where: { deletedAt: null },
-    orderBy: { createdAt: "desc" },
-    take: take + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    include: { user: { select: { name: true, email: true } } },
-  });
-  const hasMore = rows.length > take;
+// 图片审核队列（全站待审核图片，页码分页）
+export async function adminListPendingImages(page = 1, pageSize = 24) {
+  const where = { status: "PENDING", deletedAt: null };
+  const p = Math.max(1, Math.floor(page) || 1);
+  const [total, rows] = await Promise.all([
+    prisma.image.count({ where }),
+    prisma.image.findMany({
+      where,
+      orderBy: { createdAt: "asc" }, // 先传先审
+      skip: (p - 1) * pageSize,
+      take: pageSize,
+      include: { user: { select: { name: true, email: true } } },
+    }),
+  ]);
   return {
-    items: rows.slice(0, take).map((i) => ({
+    items: rows.map((i) => ({
       id: i.id,
       filename: i.filename,
       visibility: i.visibility,
@@ -111,7 +115,9 @@ export async function adminListImages(cursor?: string, take = 24) {
       ownerName: i.user.name,
       ownerEmail: i.user.email,
     })),
-    nextCursor: hasMore ? rows[take - 1].id : null,
+    page: p,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
   };
 }
 

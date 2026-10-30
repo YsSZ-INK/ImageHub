@@ -36,5 +36,16 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # 内联缓存：发布镜像自带缓存清单，后续构建直接从 ghcr 复用层缓存（registry 缓存）
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+          # 缓存来源：registry（latest 镜像内联缓存）优先，GHA 缓存兜底
+          cache-from: |
+            type=registry,ref=ghcr.io/${{ github.repository }}:latest
+            type=gha
+          cache-to: type=inline
+
+      # 只清理 7 天前的构建缓存，避免 builder 缓存无限堆积
+      - name: Prune build cache older than 7 days
+        if: always()
+        run: docker builder prune --filter until=168h -f

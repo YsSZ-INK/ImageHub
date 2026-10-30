@@ -83,6 +83,6 @@ export default auth((req) => {
 
 export const config = {
   // 跳过静态资源、NextAuth 自身路由（避免回调被中间件双重处理导致 MissingCSRF）
-  // 与 /api/upload（路由自带鉴权；middleware 会缓冲请求体，大文件上传不必要地受限）
-  matcher: ["/((?!api/auth|api/upload|_next/static|_next/image|favicon.ico).*)"],
+  // 与 /api/upload、/api/admin/backup/restore（路由自带鉴权；middleware 会缓冲请求体，大文件传输不必要地受限）
+  matcher: ["/((?!api/auth|api/upload|api/admin/backup/restore|_next/static|_next/image|favicon.ico).*)"],
 };

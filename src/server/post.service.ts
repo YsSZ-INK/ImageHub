@@ -42,7 +42,7 @@ export async function listPosts(
 ) {
   const rows = await prisma.post.findMany({
     where: {
-      images: { some: { deletedAt: null, visibility: "PUBLIC" } },
+      images: { some: { deletedAt: null, visibility: "PUBLIC", status: "PUBLISHED" } },
       ...(range?.from || range?.to
         ? {
             createdAt: {

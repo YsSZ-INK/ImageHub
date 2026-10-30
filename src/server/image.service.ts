@@ -21,6 +21,7 @@ export type ImageDTO = {
   mimeType: string;
   kind: "image" | "video";
   visibility: string;
+  status: string;
   createdAt: Date;
   blurhash: string | null;
   albumId: string | null;
@@ -39,6 +40,7 @@ export function toDTO(img: Image & { user?: { name: string } }): ImageDTO {
     mimeType: img.mimeType,
     kind: img.mimeType.startsWith("video/") ? "video" : "image",
     visibility: img.visibility,
+    status: img.status,
     createdAt: img.createdAt,
     blurhash: img.blurhash,
     albumId: img.albumId,
@@ -50,9 +52,11 @@ export function toDTO(img: Image & { user?: { name: string } }): ImageDTO {
 
 // ============ 可见性判定 ============
 // PUBLIC: 所有用户可见（含未登录，用于外链直链）；UNLISTED: 有链接可见（含未登录），不进列表；PRIVATE: 仅本人/管理员
+// PENDING（待审核）：仅本人与管理员可见——匿名外链与其他登录用户都不可见，审核通过后才对公开可见
 export function canView(img: Image, viewer: Viewer | null): boolean {
   if (viewer?.role === "ADMIN") return true;
   if (img.userId === viewer?.id) return true;
+  if (img.status !== "PUBLISHED") return false;
   return img.visibility === "PUBLIC" || img.visibility === "UNLISTED";
 }
 
@@ -63,6 +67,24 @@ export async function getImageForView(id: string, viewer: Viewer | null, include
   if (!includeDeleted && img.deletedAt) throw new AppError("图片不存在", 404);
   if (!canView(img, viewer)) throw new AppError("无权访问该图片", viewer ? 403 : 401);
   return img;
+}
+
+// 重新提交审核：仅本人/管理员，图片回到待审核状态（从画廊、公开直链与动态中隐藏）
+export async function requestReview(id: string, viewer: Viewer): Promise<ImageDTO> {
+  const img = await prisma.image.findUnique({ where: { id } });
+  if (!img || img.deletedAt) throw new AppError("图片不存在", 404);
+  if (img.userId !== viewer.id && viewer.role !== "ADMIN") throw new AppError("无权操作该图片", 403);
+  if (img.status === "PENDING") return toDTO(img);
+  return toDTO(await prisma.image.update({ where: { id }, data: { status: "PENDING" } }));
+}
+
+// 审核通过（管理员）：待审核图片进入画廊
+export async function approveImage(id: string, viewer: Viewer): Promise<ImageDTO> {
+  if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+  const img = await prisma.image.findUnique({ where: { id } });
+  if (!img || img.deletedAt) throw new AppError("图片不存在", 404);
+  if (img.status === "PUBLISHED") return toDTO(img);
+  return toDTO(await prisma.image.update({ where: { id }, data: { status: "PUBLISHED" } }));
 }
 
 // ============ 上传（含配额、去重） ============
@@ -146,6 +168,8 @@ async function uploadOne(
         sha256: processed.sha256,
         blurhash: processed.blurhash,
         albumId,
+        // 管理员上传免审核直接发布；普通用户上传进入待审核队列
+        status: user.role === "ADMIN" ? "PUBLISHED" : "PENDING",
       },
       include: { user: { select: { name: true } } },
     }),
@@ -174,8 +198,9 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
 
   switch (p.scope) {
     case "gallery":
-      // 公共画廊：所有用户的 PUBLIC 图片
+      // 公共画廊：所有用户的 PUBLIC 且已通过审核的图片
       where.visibility = "PUBLIC";
+      where.status = "PUBLISHED";
       where.deletedAt = null;
       break;
     case "mine":
@@ -194,8 +219,11 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
       if (!isOwner && album.visibility !== "PUBLIC") throw new AppError("无权访问该相册", 403);
       where.albumId = p.albumId;
       where.deletedAt = null;
-      // 相册内按可见性过滤（非拥有者）
-      if (!isOwner) where.visibility = "PUBLIC";
+      // 相册内按可见性过滤（非拥有者：仅公开且已过审）
+      if (!isOwner) {
+        where.visibility = "PUBLIC";
+        where.status = "PUBLISHED";
+      }
       break;
     }
     case "user": {
@@ -204,7 +232,10 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
       if (!target) throw new AppError("用户不存在", 404);
       where.userId = target.id;
       where.deletedAt = null;
-      if (target.id !== p.viewer.id && p.viewer.role !== "ADMIN") where.visibility = "PUBLIC";
+      if (target.id !== p.viewer.id && p.viewer.role !== "ADMIN") {
+        where.visibility = "PUBLIC";
+        where.status = "PUBLISHED";
+      }
       break;
     }
     case "admin":

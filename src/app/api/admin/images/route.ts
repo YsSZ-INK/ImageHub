@@ -1,12 +1,13 @@
 import { handle, ok } from "@/lib/api";
-import { requireApiUser } from "@/lib/session";
-import { adminListImages } from "@/server/admin.service";
+import { requireApiAdmin } from "@/lib/session";
+import { adminListPendingImages } from "@/server/admin.service";
 
 export const runtime = "nodejs";
 
-// 全站图片审核列表
+// 待审核图片队列（仅 status=PENDING，页码分页）
 export const GET = handle(async (req: Request) => {
-  await requireApiUser();
+  await requireApiAdmin();
   const url = new URL(req.url);
-  return ok(await adminListImages(url.searchParams.get("cursor") ?? undefined));
+  const page = Number(url.searchParams.get("page")) || 1;
+  return ok(await adminListPendingImages(page));
 });

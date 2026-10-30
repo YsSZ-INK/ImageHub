@@ -43,6 +43,7 @@ model Image {
   sha256     String
   blurhash   String?
   visibility String    @default("PUBLIC") // PUBLIC | PRIVATE | UNLISTED
+  status     String    @default("PUBLISHED") // PUBLISHED 已发布 | PENDING 待审核
   albumId    String?
   postId     String? // 关联的图文动态（发布到动态时挂上）
   deletedAt  DateTime? // 软删除，回收站保留 30 天

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,9 @@ export function AdminSettingsClient() {
   const [portInput, setPortInput] = useState("");
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  // 备份与还原
+  const [restoring, setRestoring] = useState(false);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch("/api/admin/settings")
@@ -67,6 +70,52 @@ export function AdminSettingsClient() {
       else toast.error(json.error);
     } finally {
       setTesting(false);
+    }
+  }
+
+  // 备份：直接导航到下载接口，由浏览器流式保存（Content-Disposition attachment）
+  function startBackup() {
+    if (!confirm("生成备份压缩包（数据库 + 全部存储文件）并下载？")) return;
+    const a = document.createElement("a");
+    a.href = "/api/admin/backup";
+    a.download = "imagehub-backup.tar.gz";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast.success("备份已开始生成，稍后自动下载");
+  }
+
+  // 还原：选择备份文件 → 强确认 → 整包上传，覆盖全部数据与存储文件
+  async function onRestoreFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // 允许重复选择同一文件
+    if (!file) return;
+    if (!/\.(tar\.gz|tgz)$/i.test(file.name)) {
+      toast.error("请选择 .tar.gz 备份文件");
+      return;
+    }
+    if (
+      !confirm(
+        `确定用「${file.name}」还原站点？\n\n当前全部数据（用户、图片记录、相册、动态、站点设置与存储文件）将被备份内容覆盖，不可撤销！\n建议先「备份并下载」保存当前状态。`
+      )
+    )
+      return;
+    setRestoring(true);
+    try {
+      const res = await fetch("/api/admin/backup/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-tar+gzip" },
+        body: file,
+      });
+      const json = await res.json();
+      if (json.ok) {
+        toast.success(json.data.message);
+        setTimeout(() => window.location.reload(), 1200);
+      } else toast.error(json.error);
+    } catch {
+      toast.error("还原请求失败，请重试");
+    } finally {
+      setRestoring(false);
     }
   }
 
@@ -188,6 +237,34 @@ export function AdminSettingsClient() {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">测试邮件发送至当前管理员邮箱，需先保存配置。</p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">备份与还原</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            备份生成单个压缩包（gzip 最高压缩），包含全部数据（用户、图片记录、相册、动态、站点设置）与全部存储文件；
+            还原时选择该文件即可，将覆盖当前站点全部数据。
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={startBackup}>
+              备份并下载
+            </Button>
+            <Button variant="destructive" disabled={restoring} onClick={() => restoreInputRef.current?.click()}>
+              {restoring ? <Loader2 className="animate-spin" /> : null} 还原备份
+            </Button>
+            <input
+              ref={restoreInputRef}
+              type="file"
+              accept=".tar.gz,.tgz,application/gzip"
+              className="hidden"
+              onChange={onRestoreFile}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">还原期间请勿进行上传等操作；还原完成后页面将自动刷新。</p>
         </CardContent>
       </Card>
       </div>

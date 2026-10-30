@@ -18,10 +18,10 @@ export function fail(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-// API 统一错误封装：route handler 用 handle 包裹
+// API 统一错误封装：route handler 用 handle 包裹（兼容 NextResponse 与原生 Response）
 export function handle<A extends unknown[]>(
-  fn: (...args: A) => Promise<NextResponse>
-): (...args: A) => Promise<NextResponse> {
+  fn: (...args: A) => Promise<Response>
+): (...args: A) => Promise<Response> {
   return async (...args: A) => {
     try {
       return await fn(...args);

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown, ZoomIn, Play } from "lucide-react";
+import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown, ZoomIn, Play, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { ImageGrid, EmptyState } from "@/components/image-grid";
@@ -72,8 +72,19 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
     toast.success("外链已复制", { description: url });
   }
 
+  // 重新审核：图片回到待审核队列，管理员通过前从画廊与公开外链中隐藏
+  async function reReview(id: string) {
+    if (!confirm("重新提交审核？审核通过前，该图片将从画廊与公开外链中隐藏。")) return;
+    const res = await fetch(`/api/images/${id}/review`, { method: "POST" });
+    const json = await res.json();
+    if (json.ok) {
+      toast.success("已提交重新审核");
+      loadPage(page);
+    } else toast.error(json.error);
+  }
+
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-[calc(100vh-6rem)] flex-col space-y-4">
       {items.length === 0 && !loading ? (
         <>
           {/* 上传入口：按钮弹出上传界面 */}
@@ -195,20 +206,41 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
                   />
                 </label>
                 <div className="absolute bottom-2 right-2 z-10 transition-opacity group-hover:opacity-0">
-                  <VisibilityBadge visibility={img.visibility} className="bg-transparent text-black ring-0" />
+                  {img.status === "PENDING" ? (
+                    <span className="rounded bg-amber-500/90 px-1.5 py-0.5 text-[10px] font-medium text-white">审核中</span>
+                  ) : (
+                    <VisibilityBadge visibility={img.visibility} className="bg-transparent text-black ring-0" />
+                  )}
                 </div>
-                <button
-                  type="button"
-                  aria-label="复制外链"
-                  title="复制外链"
-                  className="absolute right-2 top-2 rounded-md bg-black/60 p-1.5 text-white opacity-0 transition-opacity hover:bg-black/80 group-hover:opacity-100"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    copyLink(img.id);
-                  }}
-                >
-                  <Link2 className="h-3.5 w-3.5" />
-                </button>
+                {/* 顶部操作：重新审核（仅已发布）+ 复制外链 */}
+                <div className="absolute right-2 top-2 z-10 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                  {img.status === "PUBLISHED" && (
+                    <button
+                      type="button"
+                      aria-label="重新审核"
+                      title="重新审核：通过前将从画廊与外链隐藏"
+                      className="rounded-md bg-black/60 p-1.5 text-white transition-colors hover:bg-black/80"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        reReview(img.id);
+                      }}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    aria-label="复制外链"
+                    title="复制外链"
+                    className="rounded-md bg-black/60 p-1.5 text-white transition-colors hover:bg-black/80"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      copyLink(img.id);
+                    }}
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
                 <p className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent p-1.5 text-xs text-white opacity-0 group-hover:opacity-100">
                   {img.filename}
                 </p>
@@ -230,8 +262,10 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
           ))}
           </div>
 
-          {/* 翻页：支持输入页码跳转 */}
-          <Pager page={page} hasNext={hasNext} disabled={loading} onGo={gotoPage} />
+          {/* 翻页：贴底显示（支持输入页码跳转） */}
+          <div className="mt-auto">
+            <Pager page={page} hasNext={hasNext} disabled={loading} onGo={gotoPage} />
+          </div>
         </>
       )}
 
