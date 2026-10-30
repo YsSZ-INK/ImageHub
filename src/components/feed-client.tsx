@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, ImagePlus, Send, Trash2, ChevronDown } from "lucide-react";
+import { Loader2, ImagePlus, Send, Trash2, ChevronDown, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { Lightbox } from "@/components/lightbox";
@@ -120,8 +120,8 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
   );
 }
 
-// ============ 发布器：文字 + 选择本地图片（逐张上传后创建动态） ============
-type Picked = { file: File; url: string };
+// ============ 发布器：文字 + 选择本地图片/视频（逐张上传后创建动态） ============
+type Picked = { file: File; url: string; isVideo: boolean };
 
 function Composer({ me, onPublished }: { me: { name: string; avatarUrl: string | null }; onPublished: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -131,15 +131,19 @@ function Composer({ me, onPublished }: { me: { name: string; avatarUrl: string |
   const [progress, setProgress] = useState("");
 
   function addFiles(list: FileList | File[]) {
-    const valid = Array.from(list).filter((f) => !f.type || f.type.startsWith("image/"));
+    // 允许 type 为空的文件（由服务端魔数校验兜底）
+    const valid = Array.from(list).filter((f) => !f.type || f.type.startsWith("image/") || f.type.startsWith("video/"));
     if (valid.length === 0) {
-      toast.error("仅支持图片文件");
+      toast.error("仅支持图片/视频文件");
       return;
     }
     const room = MAX_POST_IMAGES - picked.length;
-    if (valid.length > room) toast.error(`一条动态最多 ${MAX_POST_IMAGES} 张图片`);
+    if (valid.length > room) toast.error(`一条动态最多 ${MAX_POST_IMAGES} 个文件`);
     const accepted = valid.slice(0, Math.max(0, room));
-    setPicked((prev) => [...prev, ...accepted.map((f) => ({ file: f, url: URL.createObjectURL(f) }))]);
+    setPicked((prev) => [
+      ...prev,
+      ...accepted.map((f) => ({ file: f, url: URL.createObjectURL(f), isVideo: f.type.startsWith("video/") })),
+    ]);
   }
 
   function removeAt(i: number) {
@@ -201,8 +205,17 @@ function Composer({ me, onPublished }: { me: { name: string; avatarUrl: string |
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
               {picked.map((p, i) => (
                 <div key={p.url} className="group relative overflow-hidden rounded-lg border border-border">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.url} alt={`待发布 ${i + 1}`} className="aspect-square w-full bg-muted object-cover" />
+                  {p.isVideo ? (
+                    <>
+                      <video src={p.url} preload="metadata" muted playsInline className="aspect-square w-full bg-muted object-cover" />
+                      <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                        <Play className="h-6 w-6 fill-white/90 text-white/90 drop-shadow-md" />
+                      </span>
+                    </>
+                  ) : (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={p.url} alt={`待发布 ${i + 1}`} className="aspect-square w-full bg-muted object-cover" />
+                  )}
                   <button
                     type="button"
                     aria-label="移除"
@@ -220,7 +233,7 @@ function Composer({ me, onPublished }: { me: { name: string; avatarUrl: string |
             <input
               ref={inputRef}
               type="file"
-              accept="image/jpeg,.jpg,.jpeg,image/png,image/webp,image/gif,image/avif"
+              accept="image/jpeg,.jpg,.jpeg,image/png,image/webp,image/gif,image/avif,video/mp4,.mp4,.m4v,video/webm,.webm,video/quicktime,.mov,.mkv,video/x-matroska"
               multiple
               hidden
               onChange={(e) => {
@@ -235,7 +248,7 @@ function Composer({ me, onPublished }: { me: { name: string; avatarUrl: string |
               onClick={() => inputRef.current?.click()}
             >
               <ImagePlus className="h-4 w-4" />
-              选择图片{picked.length > 0 ? ` (${picked.length}/${MAX_POST_IMAGES})` : ""}
+              选择图片/视频{picked.length > 0 ? ` (${picked.length}/${MAX_POST_IMAGES})` : ""}
             </Button>
             <Button size="sm" disabled={publishing || picked.length === 0} onClick={publish}>
               {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
@@ -284,14 +297,29 @@ function PostCard({
           {post.caption && <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed">{post.caption}</p>}
 
           {n === 1 ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={post.images[0].thumbUrl}
-              alt={post.images[0].filename}
-              loading="lazy"
-              className="mt-2 max-h-72 max-w-full cursor-pointer rounded-lg bg-muted object-contain"
-              onClick={() => onPreview({ images: post.images, index: 0 })}
-            />
+            post.images[0].kind === "video" ? (
+              <div className="relative mt-2 inline-block cursor-pointer" onClick={() => onPreview({ images: post.images, index: 0 })}>
+                <video
+                  src={post.images[0].rawUrl}
+                  preload="metadata"
+                  muted
+                  playsInline
+                  className="max-h-72 max-w-full rounded-lg bg-muted object-contain"
+                />
+                <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <Play className="h-10 w-10 fill-white/90 text-white/90 drop-shadow-md" />
+                </span>
+              </div>
+            ) : (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={post.images[0].thumbUrl}
+                alt={post.images[0].filename}
+                loading="lazy"
+                className="mt-2 max-h-72 max-w-full cursor-pointer rounded-lg bg-muted object-contain"
+                onClick={() => onPreview({ images: post.images, index: 0 })}
+              />
+            )
           ) : (
             <div
               className={cn(
@@ -299,17 +327,32 @@ function PostCard({
                 n === 2 || n === 4 ? "max-w-sm grid-cols-2" : "max-w-md grid-cols-3"
               )}
             >
-              {post.images.map((img, i) => (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img
-                  key={img.id}
-                  src={img.thumbUrl}
-                  alt={img.filename}
-                  loading="lazy"
-                  className="aspect-square w-full cursor-pointer rounded-md bg-muted object-cover"
-                  onClick={() => onPreview({ images: post.images, index: i })}
-                />
-              ))}
+              {post.images.map((img, i) =>
+                img.kind === "video" ? (
+                  <div key={img.id} className="relative cursor-pointer" onClick={() => onPreview({ images: post.images, index: i })}>
+                    <video
+                      src={img.rawUrl}
+                      preload="metadata"
+                      muted
+                      playsInline
+                      className="aspect-square w-full rounded-md bg-muted object-cover"
+                    />
+                    <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                      <Play className="h-6 w-6 fill-white/90 text-white/90 drop-shadow-md" />
+                    </span>
+                  </div>
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    key={img.id}
+                    src={img.thumbUrl}
+                    alt={img.filename}
+                    loading="lazy"
+                    className="aspect-square w-full cursor-pointer rounded-md bg-muted object-cover"
+                    onClick={() => onPreview({ images: post.images, index: i })}
+                  />
+                )
+              )}
             </div>
           )}
 

@@ -96,14 +96,26 @@ export function Lightbox({
         >
           <ChevronLeft className="h-6 w-6" />
         </Button>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          key={img.id}
-          src={img.rawUrl}
-          alt={img.filename}
-          className="anim-zoom-in max-h-full max-w-full object-contain select-none"
-          draggable={false}
-        />
+        {img.kind === "video" ? (
+          // 视频：灯箱内直接播放（autoPlay + controls）
+          <video
+            key={img.id}
+            src={img.rawUrl}
+            controls
+            autoPlay
+            playsInline
+            className="anim-zoom-in max-h-full max-w-full"
+          />
+        ) : (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            key={img.id}
+            src={img.rawUrl}
+            alt={img.filename}
+            className="anim-zoom-in max-h-full max-w-full object-contain select-none"
+            draggable={false}
+          />
+        )}
         <Button
           variant="ghost"
           size="icon"
@@ -116,7 +128,7 @@ export function Lightbox({
 
         {showInfo && (
           <div className="anim-fade-in absolute bottom-4 left-1/2 -translate-x-1/2 rounded-xl border border-white/10 bg-black/70 text-white text-xs p-3.5 space-y-1.5 backdrop-blur-md">
-            <p>尺寸：{img.width} × {img.height}</p>
+            {img.kind !== "video" && <p>尺寸：{img.width} × {img.height}</p>}
             <p>大小：{formatBytes(img.size)}</p>
             <p>格式：{img.mimeType}</p>
             <p>上传：{formatDate(img.createdAt)}</p>

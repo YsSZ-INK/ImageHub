@@ -28,14 +28,18 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
           href={`/api/images/${id}/download`}
           className="text-sm text-primary hover:underline"
         >
-          下载原图
+          下载{img.kind === "video" ? "视频" : "原图"}
         </a>
       </div>
 
         <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
           <div className="flex items-center justify-center rounded-xl border border-border bg-muted/20 p-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={img.rawUrl} alt={img.filename} className="max-h-[70vh] max-w-full object-contain" />
+            {img.kind === "video" ? (
+              <video src={img.rawUrl} controls playsInline className="max-h-[70vh] max-w-full" />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={img.rawUrl} alt={img.filename} className="max-h-[70vh] max-w-full object-contain" />
+            )}
           </div>
 
           <div className="space-y-4">
@@ -44,10 +48,12 @@ export default async function ImageDetailPage({ params }: { params: Promise<{ id
                 <CardTitle className="text-base">信息</CardTitle>
               </CardHeader>
               <CardContent className="space-y-1.5 text-sm">
-                <p className="flex justify-between">
-                  <span className="text-muted-foreground">尺寸</span>
-                  <span>{img.width} × {img.height}</span>
-                </p>
+                {img.kind !== "video" && (
+                  <p className="flex justify-between">
+                    <span className="text-muted-foreground">尺寸</span>
+                    <span>{img.width} × {img.height}</span>
+                  </p>
+                )}
                 <p className="flex justify-between">
                   <span className="text-muted-foreground">大小</span>
                   <span>{formatBytes(img.size)}</span>

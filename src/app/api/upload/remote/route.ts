@@ -46,12 +46,13 @@ export const POST = handle(async (req: Request) => {
   if (!res.ok) throw new AppError(`抓取失败：目标返回 ${res.status}`, 502);
 
   const contentType = res.headers.get("content-type") ?? "";
-  if (!contentType.startsWith("image/")) throw new AppError("目标不是图片", 415);
+  if (!contentType.startsWith("image/") && !contentType.startsWith("video/"))
+    throw new AppError("目标不是图片或视频", 415);
 
   const arr = await res.arrayBuffer();
-  if (arr.byteLength > 30 * 1024 * 1024) throw new AppError("远程文件过大（上限 30MB）", 413);
+  if (arr.byteLength > 50 * 1024 * 1024) throw new AppError("远程文件过大（上限 50MB）", 413);
 
-  const name = decodeURIComponent(parsed.pathname.split("/").pop() || "remote-image");
+  const name = decodeURIComponent(parsed.pathname.split("/").pop() || "remote-file");
   const { results } = await uploadImages(user, [{ buf: Buffer.from(arr), name, contentType }], { albumId: albumId ?? null });
   const first = results[0];
   if (!first || "error" in first) throw new AppError("error" in first ? first.error : "抓取失败", 400);

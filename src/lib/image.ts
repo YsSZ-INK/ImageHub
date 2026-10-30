@@ -15,6 +15,38 @@ export const ALLOWED_MIMES = {
 
 export type AllowedMime = keyof typeof ALLOWED_MIMES;
 
+// 允许的视频类型白名单（浏览器原生可播放）
+export const ALLOWED_VIDEO_MIMES: Record<string, string> = {
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+  "video/quicktime": "mov",
+  "video/x-matroska": "mkv",
+} as const;
+
+/**
+ * 视频魔数校验：
+ * - MP4/M4V/MOV: 偏移 4-8 为 "ftyp" + 品牌（isom/mp41/qt 等注：avif/avis/heic 品牌不在此匹配，走图片分支）
+ * - WebM/MKV: EBML 头 1A 45 DF A3，再按 DocType 区分
+ * 返回实际检测出的 mime；不是受支持的视频返回 null
+ */
+export function detectVideoMime(buf: Buffer): string | null {
+  if (buf.length < 12) return null;
+  if (buf.toString("ascii", 4, 8) === "ftyp") {
+    const brand = buf.toString("ascii", 8, 12);
+    if (brand.startsWith("qt")) return "video/quicktime";
+    if (/^(isom|iso2|mp41|mp42|avc1|dash|MSNV|mmp4|mp71)/i.test(brand) || /^mp/i.test(brand) || /^m4v/i.test(brand))
+      return "video/mp4";
+    return null;
+  }
+  if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) {
+    const head = buf.subarray(0, 64).toString("latin1");
+    if (head.includes("webm")) return "video/webm";
+    if (head.includes("matroska")) return "video/x-matroska";
+    return null;
+  }
+  return null;
+}
+
 /**
  * MIME + 文件魔数双重校验
  * 返回实际检测出的 mime；不在白名单返回 null
@@ -148,6 +180,38 @@ export async function processAndStoreImage(
     height,
     sha256,
     blurhash,
+  };
+}
+
+/**
+ * 视频存储：不做转码/缩略图（无 ffmpeg），按原始字节存盘。
+ * thumbKey 置空（前端用 <video preload="metadata"> 取首帧），宽高 0，无 blurhash。
+ */
+export async function processAndStoreVideo(
+  buf: Buffer,
+  userId: string,
+  originalName: string
+): Promise<ProcessedUpload> {
+  const mime = detectVideoMime(buf);
+  if (!mime) throw new AppError("不支持的视频格式（仅允许 mp4/webm/mov/mkv）", 415);
+
+  const sha256 = createHash("sha256").update(buf).digest("hex");
+  const storage = await getStorage();
+  const rand = randomBytes(4).toString("hex");
+  const ext = ALLOWED_VIDEO_MIMES[mime];
+  const storageKey = `videos/${userId}/${monthKey()}/${sha256.slice(0, 16)}-${rand}.${ext}`;
+  await storage.put(storageKey, buf, { contentType: mime });
+
+  return {
+    filename: sanitizeName(originalName),
+    storageKey,
+    thumbKey: "",
+    mimeType: mime,
+    size: buf.length,
+    width: 0,
+    height: 0,
+    sha256,
+    blurhash: null,
   };
 }
 

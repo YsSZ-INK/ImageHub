@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ImageOff } from "lucide-react";
+import { ImageOff, Play } from "lucide-react";
 import { Lightbox } from "@/components/lightbox";
 import { VisibilityBadge, ImageActions, RestoreButton } from "@/components/image-actions";
 import type { ImageDTO } from "@/server/image.service";
@@ -40,6 +40,21 @@ export function ImageGrid({
         <div className="flex h-40 items-center justify-center text-muted-foreground">
           <ImageOff className="h-6 w-6" />
         </div>
+      ) : img.kind === "video" ? (
+        // 视频无缩略图：<video> 首帧做卡片 + 播放角标，点击进灯箱播放
+        <>
+          <video
+            src={img.rawUrl}
+            preload="metadata"
+            muted
+            playsInline
+            onClick={() => setLightbox(items.indexOf(img))}
+            className={`w-full cursor-zoom-in bg-muted object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03] ${layout === "grid" ? "aspect-square" : ""}`}
+          />
+          <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <Play className="h-8 w-8 fill-white/90 text-white/90 drop-shadow-md" />
+          </span>
+        </>
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -73,7 +88,7 @@ export function ImageGrid({
 
   return (
     <>
-      {layout === "waterfall" ? <div className="masonry">{items.map(card)}</div> : <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8">{items.map(card)}</div>}
+      {layout === "waterfall" ? <div className="masonry">{items.map(card)}</div> : <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">{items.map(card)}</div>}
       {lightbox !== null && visible.length > 0 && (
         <Lightbox
           images={items}
@@ -109,7 +124,7 @@ export function EmptyState({
 
 export function GridSkeleton({ count = 12 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className="aspect-square animate-pulse rounded-lg bg-muted" />
       ))}

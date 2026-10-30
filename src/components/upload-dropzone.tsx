@@ -109,9 +109,11 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
 
   function addFiles(files: FileList | File[]) {
     // 允许 type 为空的文件（部分应用拖拽时浏览器识别不出 MIME），由服务端魔数校验兜底
-    const valid = Array.from(files).filter((f) => !f.type || f.type.startsWith("image/"));
+    const valid = Array.from(files).filter(
+      (f) => !f.type || f.type.startsWith("image/") || f.type.startsWith("video/")
+    );
     if (valid.length === 0) {
-      toast.error("仅支持图片文件");
+      toast.error("仅支持图片/视频文件");
       return;
     }
     const newItems = valid.map((f) => ({
@@ -195,13 +197,13 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
       >
         <UploadCloud className={cn("h-10 w-10 text-muted-foreground transition-transform duration-200", dragOver && "-translate-y-1 text-seal scale-110")} />
         <div>
-          <p className="font-medium">拖拽图片到此处，或点击选择文件</p>
-          <p className="mt-1 text-xs text-muted-foreground">支持 jpg / jpeg / png / webp / gif / avif · 支持粘贴 · 多文件并发</p>
+          <p className="font-medium">拖拽图片或视频到此处，或点击选择文件</p>
+          <p className="mt-1 text-xs text-muted-foreground">图片 jpg / png / webp / gif / avif · 视频 mp4 / webm / mov / mkv · 支持粘贴 · 多文件并发</p>
         </div>
         <input
           ref={inputRef}
           type="file"
-          accept="image/jpeg,.jpg,.jpeg,image/png,image/webp,image/gif,image/avif"
+          accept="image/jpeg,.jpg,.jpeg,image/png,image/webp,image/gif,image/avif,video/mp4,.mp4,.m4v,video/webm,.webm,video/quicktime,.mov,.mkv,video/x-matroska"
           multiple
           hidden
           onChange={(e) => {
@@ -213,7 +215,7 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
 
       <div className="flex gap-2">
         <Input
-          placeholder="或粘贴图片 URL 远程抓取（https://…）"
+          placeholder="或粘贴图片/视频 URL 远程抓取（https://…）"
           value={remoteUrl}
           onChange={(e) => setRemoteUrl(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && fetchRemote()}

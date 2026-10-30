@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
 import { getStorage } from "@/lib/storage";
-import { processAndStoreImage } from "@/lib/image";
+import { processAndStoreImage, processAndStoreVideo, detectVideoMime } from "@/lib/image";
 import type { User, Image } from "@prisma/client";
 import type { z } from "zod";
 import type {
@@ -19,6 +19,7 @@ export type ImageDTO = {
   height: number;
   size: number;
   mimeType: string;
+  kind: "image" | "video";
   visibility: string;
   createdAt: Date;
   blurhash: string | null;
@@ -36,6 +37,7 @@ export function toDTO(img: Image & { user?: { name: string } }): ImageDTO {
     height: img.height,
     size: img.size,
     mimeType: img.mimeType,
+    kind: img.mimeType.startsWith("video/") ? "video" : "image",
     visibility: img.visibility,
     createdAt: img.createdAt,
     blurhash: img.blurhash,
@@ -126,7 +128,10 @@ async function uploadOne(
     throw new AppError("存储配额不足，请清理空间或联系管理员", 413);
   }
 
-  const processed = await processAndStoreImage(f.buf, user.id, f.name);
+  // 视频（魔数识别）原样存储；图片走处理流水线（缩略图/WebP/blurhash）
+  const processed = detectVideoMime(f.buf)
+    ? await processAndStoreVideo(f.buf, user.id, f.name)
+    : await processAndStoreImage(f.buf, user.id, f.name);
   const [img] = await prisma.$transaction([
     prisma.image.create({
       data: {
@@ -380,6 +385,12 @@ export async function listAlbums(viewer: Viewer, username?: string) {
       _count: { select: { images: { where: { deletedAt: null } } } },
     },
   });
+  // 视频没有缩略图，封面若指向视频则回退为占位
+  const coverIds = albums.map((a) => a.coverImageId).filter((x): x is string => Boolean(x));
+  const coverRows = coverIds.length
+    ? await prisma.image.findMany({ where: { id: { in: coverIds } }, select: { id: true, mimeType: true } })
+    : [];
+  const videoCovers = new Set(coverRows.filter((i) => i.mimeType.startsWith("video/")).map((i) => i.id));
   return albums.map((a) => ({
     id: a.id,
     name: a.name,
@@ -389,7 +400,7 @@ export async function listAlbums(viewer: Viewer, username?: string) {
     coverImageId: a.coverImageId,
     imageCount: a._count.images,
     createdAt: a.createdAt,
-    coverUrl: a.coverImageId ? `/api/images/${a.coverImageId}/thumb` : null,
+    coverUrl: a.coverImageId && !videoCovers.has(a.coverImageId) ? `/api/images/${a.coverImageId}/thumb` : null,
   }));
 }
 

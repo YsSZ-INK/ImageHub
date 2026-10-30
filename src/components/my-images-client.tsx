@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown, ZoomIn } from "lucide-react";
+import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown, ZoomIn, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { ImageGrid, EmptyState } from "@/components/image-grid";
@@ -79,7 +79,7 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
           {/* 上传入口：按钮弹出上传界面 */}
           <div className="flex justify-end">
             <Button size="sm" onClick={() => setUploadOpen(true)}>
-              <UploadCloud className="h-4 w-4" /> 上传图片
+              <UploadCloud className="h-4 w-4" /> 上传图片 / 视频
             </Button>
           </div>
           <EmptyState title="还没有图片" description="去上传你的第一张图片吧" />
@@ -140,22 +140,38 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
               </div>
             </div>
             <Button size="sm" onClick={() => setUploadOpen(true)}>
-              <UploadCloud className="h-4 w-4" /> 上传图片
+              <UploadCloud className="h-4 w-4" /> 上传图片 / 视频
             </Button>
           </div>
 
           {/* 带复选框的网格 */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
             {items.map((img, idx) => (
               <div key={img.id} className="group relative overflow-hidden rounded-lg border border-border">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={img.thumbUrl}
-                  alt={img.filename}
-                  loading="lazy"
-                  className="aspect-square w-full cursor-pointer bg-muted object-cover"
-                  onClick={() => toggle(img.id)}
-                />
+                {img.kind === "video" ? (
+                  <>
+                    <video
+                      src={img.rawUrl}
+                      preload="metadata"
+                      muted
+                      playsInline
+                      className="aspect-square w-full cursor-pointer bg-muted object-cover"
+                      onClick={() => toggle(img.id)}
+                    />
+                    <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                      <Play className="h-7 w-7 fill-white/90 text-white/90 drop-shadow-md" />
+                    </span>
+                  </>
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={img.thumbUrl}
+                    alt={img.filename}
+                    loading="lazy"
+                    className="aspect-square w-full cursor-pointer bg-muted object-cover"
+                    onClick={() => toggle(img.id)}
+                  />
+                )}
                 {/* 正中放大按钮：点击放大查看，不触发选中 */}
                 <button
                   type="button"
