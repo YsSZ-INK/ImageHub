@@ -32,11 +32,26 @@ export async function ensureDefaultAlbum(userId: string) {
   });
 }
 
-// ============ 动态列表（朋友圈式 feed，游标分页） ============
+// ============ 动态列表（朋友圈式 feed，游标分页，支持时间范围过滤） ============
 // 仅展示至少含一张公开图片的动态；动态内图片同样只取未删除且公开的（发布后图片被改私有/删除时自动从 feed 消失）
-export async function listPosts(viewer: Viewer, cursor?: string, take = 10) {
+export async function listPosts(
+  viewer: Viewer,
+  cursor?: string,
+  take = 10,
+  range?: { from?: Date; to?: Date }
+) {
   const rows = await prisma.post.findMany({
-    where: { images: { some: { deletedAt: null, visibility: "PUBLIC" } } },
+    where: {
+      images: { some: { deletedAt: null, visibility: "PUBLIC" } },
+      ...(range?.from || range?.to
+        ? {
+            createdAt: {
+              ...(range.from ? { gte: range.from } : {}),
+              ...(range.to ? { lte: range.to } : {}),
+            },
+          }
+        : {}),
+    },
     orderBy: { createdAt: "desc" },
     take: take + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),

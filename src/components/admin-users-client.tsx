@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Ban, ShieldCheck, Crown, UserPlus } from "lucide-react";
+import { Loader2, Ban, ShieldCheck, Crown, UserPlus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -114,6 +114,61 @@ export function AdminUsersClient() {
     }
   }
 
+  async function removeUser(u: AdminUser) {
+    if (
+      !confirm(
+        `确定删除用户「${u.name}」？\n\n其全部图片、相册、图文动态与存储文件将被永久删除，不可恢复！\n建议优先使用「封禁」保留数据。`
+      )
+    )
+      return;
+    setUpdating(u.id);
+    try {
+      const res = await fetch(`/api/admin/users/${u.id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.ok) {
+        toast.success(`用户 ${u.name} 已删除`);
+        setSelected((s) => {
+          const next = new Set(s);
+          next.delete(u.id);
+          return next;
+        });
+        load(search);
+      } else toast.error(json.error);
+    } finally {
+      setUpdating(null);
+    }
+  }
+
+  // 批量删除：跳过自己与管理员（与单个删除的保护规则一致），永久删除其全部数据
+  async function batchDelete() {
+    const targets = users.filter((u) => selected.has(u.id) && !u.isSelf && u.role !== "ADMIN");
+    const skipped = selected.size - targets.length;
+    if (targets.length === 0) {
+      toast.error(skipped > 0 ? "所选均为管理员或自己，批量删除已跳过" : "请先选择用户");
+      return;
+    }
+    if (
+      !confirm(
+        `确定删除选中的 ${targets.length} 个用户？${skipped > 0 ? `（${skipped} 个管理员/自己已自动跳过）` : ""}\n\n他们的全部图片、相册、图文动态与存储文件将被永久删除，不可恢复！\n建议优先使用「批量封禁」保留数据。`
+      )
+    )
+      return;
+    setUpdating("batch");
+    try {
+      const results = await Promise.allSettled(
+        targets.map((u) => fetch(`/api/admin/users/${u.id}`, { method: "DELETE" }).then((r) => r.json()))
+      );
+      const okCount = results.filter((x) => x.status === "fulfilled" && x.value?.ok).length;
+      if (okCount > 0) {
+        toast.success(`已删除 ${okCount} 个用户`);
+        setSelected(new Set());
+        load(search);
+      } else toast.error("删除失败，请重试");
+    } finally {
+      setUpdating(null);
+    }
+  }
+
   function adjustQuota(u: AdminUser) {
     const gb = prompt(`调整 ${u.name} 的配额（GB），当前 ${(Number(u.storageQuota) / 1024 ** 3).toFixed(1)}GB`);
     if (!gb) return;
@@ -188,6 +243,9 @@ export function AdminUsersClient() {
         </Button>
         <Button size="sm" variant="destructive" disabled={updating === "batch" || selected.size === 0} onClick={() => batchStatus("BANNED")}>
           <Ban className="h-4 w-4" /> 批量封禁
+        </Button>
+        <Button size="sm" variant="destructive" disabled={updating === "batch" || selected.size === 0} onClick={batchDelete}>
+          <Trash2 className="h-4 w-4" /> 批量删除
         </Button>
       </div>
 
@@ -284,6 +342,17 @@ export function AdminUsersClient() {
                       <Button size="sm" variant="outline" disabled={updating === u.id} onClick={() => adjustQuota(u)}>
                         配额
                       </Button>
+                      {/* 删除用户：自己与管理员不显示（管理员需先降级） */}
+                      {!u.isSelf && u.role !== "ADMIN" && (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={updating === u.id}
+                          onClick={() => removeUser(u)}
+                        >
+                          <Trash2 className="h-3 w-3" /> 删除
+                        </Button>
+                      )}
                     </div>
                   </td>
                 </tr>

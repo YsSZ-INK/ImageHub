@@ -224,7 +224,8 @@ main {
   .masonry { column-count: 4; }
 }
 @media (min-width: 1536px) {
-  .masonry { column-count: 6; }
+  /* 大屏 5 列：卡片更大、单页更高，避免高窗口下方大片空白 */
+  .masonry { column-count: 5; }
 }
 .masonry > * {
   break-inside: avoid;

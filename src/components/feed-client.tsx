@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, ImagePlus, Send, Trash2, ChevronDown, Play } from "lucide-react";
+import { Loader2, ImagePlus, Send, Trash2, ChevronDown, Play, CalendarDays } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { Lightbox } from "@/components/lightbox";
@@ -31,7 +32,7 @@ function formatPostDate(value: string) {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-// 图文动态：朋友圈式 feed（发布器 + 动态流 + 灯箱预览 + 删除）
+// 图文动态：朋友圈式 feed（发布器 + 时间筛选 + 动态流 + 灯箱预览 + 删除）
 export function FeedClient({ me }: { me: { name: string; avatarUrl: string | null } }) {
   const [items, setItems] = useState<FeedPost[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -39,29 +40,43 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  // 时间筛选（YYYY-MM-DD，空串表示不限）
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   // 灯箱：{ images, index } 限定在单条动态内切换
   const [preview, setPreview] = useState<{ images: FeedImage[]; index: number } | null>(null);
 
-  const load = useCallback(async (c?: string | null) => {
-    if (!c) setLoading(true);
-    else setLoadingMore(true);
-    try {
-      const res = await fetch(`/api/posts${c ? `?cursor=${encodeURIComponent(c)}` : ""}`);
-      const json = await res.json();
-      if (json.ok) {
-        setItems((prev) => (c ? [...prev, ...json.data.items] : json.data.items));
-        setCursor(json.data.nextCursor);
-        setHasMore(Boolean(json.data.nextCursor));
-      } else toast.error(json.error);
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  }, []);
+  // 本地日期 → 当地起止时刻的 ISO 时间戳（服务端用绝对时刻比较，无时区偏差）
+
+  const load = useCallback(
+    async (c?: string | null, f?: string, t?: string) => {
+      if (!c) setLoading(true);
+      else setLoadingMore(true);
+      try {
+        const p = new URLSearchParams();
+        if (c) p.set("cursor", c);
+        if (f) p.set("from", new Date(`${f}T00:00:00`).toISOString());
+        if (t) p.set("to", new Date(`${t}T23:59:59.999`).toISOString());
+        const qs = p.toString();
+        const res = await fetch(`/api/posts${qs ? `?${qs}` : ""}`);
+        const json = await res.json();
+        if (json.ok) {
+          setItems((prev) => (c ? [...prev, ...json.data.items] : json.data.items));
+          setCursor(json.data.nextCursor);
+          setHasMore(Boolean(json.data.nextCursor));
+        } else toast.error(json.error);
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
-    load();
-  }, [load]);
+    load(null, from, to);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load, from, to]);
 
   async function removePost(p: FeedPost) {
     if (!confirm(`删除这条动态？图片仍会保留在相册中。`)) return;
@@ -79,10 +94,23 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-4">
+    <div className="mx-auto w-full max-w-3xl space-y-4 xl:max-w-4xl">
       <h1 className="text-xl font-bold">图文动态</h1>
 
-      <Composer me={me} onPublished={() => load()} />
+      {/* 时间筛选：按动态发布日期范围过滤 */}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <CalendarDays className="h-4 w-4 text-muted-foreground" />
+        <Input type="date" className="h-8 w-40" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
+        <span className="text-muted-foreground">至</span>
+        <Input type="date" className="h-8 w-40" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
+        {(from || to) && (
+          <Button variant="outline" size="sm" onClick={() => { setFrom(""); setTo(""); }}>
+            清除筛选
+          </Button>
+        )}
+      </div>
+
+      <Composer me={me} onPublished={() => load(null, from, to)} />
 
       {loading ? (
         <div className="flex justify-center py-10">
@@ -99,7 +127,7 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
           </div>
           {hasMore && (
             <div className="flex justify-center">
-              <Button variant="outline" size="sm" disabled={loadingMore} onClick={() => load(cursor)}>
+              <Button variant="outline" size="sm" disabled={loadingMore} onClick={() => load(cursor, from, to)}>
                 {loadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronDown className="h-4 w-4" />}
                 查看更多
               </Button>
@@ -304,7 +332,7 @@ function PostCard({
                   preload="metadata"
                   muted
                   playsInline
-                  className="max-h-72 max-w-full rounded-lg bg-muted object-contain"
+                  className="max-h-96 max-w-full rounded-lg bg-muted object-contain"
                 />
                 <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
                   <Play className="h-10 w-10 fill-white/90 text-white/90 drop-shadow-md" />
@@ -316,7 +344,7 @@ function PostCard({
                 src={post.images[0].thumbUrl}
                 alt={post.images[0].filename}
                 loading="lazy"
-                className="mt-2 max-h-72 max-w-full cursor-pointer rounded-lg bg-muted object-contain"
+                className="mt-2 max-h-96 max-w-full cursor-pointer rounded-lg bg-muted object-contain"
                 onClick={() => onPreview({ images: post.images, index: 0 })}
               />
             )
@@ -324,7 +352,7 @@ function PostCard({
             <div
               className={cn(
                 "mt-2 grid gap-1",
-                n === 2 || n === 4 ? "max-w-sm grid-cols-2" : "max-w-md grid-cols-3"
+                n === 2 || n === 4 ? "max-w-md grid-cols-2" : "max-w-lg grid-cols-3"
               )}
             >
               {post.images.map((img, i) =>

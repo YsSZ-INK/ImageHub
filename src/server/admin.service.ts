@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
 import { getStorage } from "@/lib/storage";
+import { deleteAccount } from "@/server/user.service";
 import type { z } from "zod";
 import type { adminUserCreateSchema } from "@/lib/validation";
 
@@ -50,6 +51,16 @@ export async function adminCreateUser(input: z.infer<typeof adminUserCreateSchem
         : {}),
     },
   });
+}
+
+// ============ 删除用户（永久删除该用户全部数据：图片 / 相册 / 动态 / 存储） ============
+export async function adminDeleteUser(adminId: string, id: string) {
+  if (id === adminId) throw new AppError("不能删除自己的账号，请使用「个人中心 → 账号注销」", 400);
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user) throw new AppError("用户不存在", 404);
+  // 保护：管理员需先降级再删除，避免误删后台管理账号
+  if (user.role === "ADMIN") throw new AppError("管理员不能直接删除，请先降级为普通用户", 400);
+  await deleteAccount(user);
 }
 
 export async function adminUpdateUser(
