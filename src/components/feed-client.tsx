@@ -24,20 +24,11 @@ type FeedPost = {
 
 const MAX_POST_IMAGES = 9;
 
-// 日期显示：今天只显时分，昨天加「昨天」前缀，同年 M月D日，跨年带年份
+// 日期显示：精确到年月日时分秒
 function formatPostDate(value: string) {
-  const date = new Date(value);
-  const now = new Date();
-  const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  const hm = date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (sameDay(date, now)) return hm;
-  if (sameDay(date, yesterday)) return `昨天 ${hm}`;
-  const md = `${date.getMonth() + 1}月${date.getDate()}日`;
-  if (date.getFullYear() === now.getFullYear()) return `${md} ${hm}`;
-  return `${date.getFullYear()}年${md} ${hm}`;
+  const d = new Date(value);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 // 图文动态：朋友圈式 feed（发布器 + 动态流 + 灯箱预览 + 删除）
