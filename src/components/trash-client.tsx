@@ -1,61 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Trash2, RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ImageGrid, EmptyState } from "@/components/image-grid";
-import type { ImageDTO } from "@/server/image.service";
+import { Pager } from "@/components/pager";
+import { useCursorPager } from "@/lib/use-cursor-pager";
 
-// 回收站：软删除图片，游标栈翻页 + 全选本页 + 恢复/彻底删除
+// 回收站：软删除图片，游标分页（可跳页）+ 全选本页 + 恢复/彻底删除
 export function TrashClient() {
-  const [items, setItems] = useState<ImageDTO[]>([]);
-  const [page, setPage] = useState(1);
-  const [pageCursors, setPageCursors] = useState<(string | null)[]>([null]);
-  const [hasNext, setHasNext] = useState(false);
-  const [loading, setLoading] = useState(true);
+  // 游标分页：翻页/跳页逻辑统一在 hook 内
+  const { items, page, hasNext, loading, loadPage, gotoPage } = useCursorPager({ scope: "trash" });
   const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  // 翻页：游标栈（pageCursors[i] = 请求第 i+1 页所需的 cursor）
-  const loadPage = useCallback(
-    async (target: number) => {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({ scope: "trash" });
-        const c = pageCursors[target - 1];
-        if (c) params.set("cursor", c);
-        const res = await fetch(`/api/images?${params}`);
-        const json = await res.json();
-        if (json.ok) {
-          // 当前页被删空且不是第一页时，回退一页
-          if (json.data.items.length === 0 && target > 1) {
-            setPageCursors((prev) => prev.slice(0, target));
-            setLoading(false);
-            return loadPage(target - 1);
-          }
-          setItems(json.data.items);
-          setPage(target);
-          setHasNext(!!json.data.nextCursor);
-          if (json.data.nextCursor) {
-            setPageCursors((prev) => {
-              const next = [...prev];
-              next[target] = json.data.nextCursor;
-              return next;
-            });
-          }
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        }
-      } finally {
-        setLoading(false);
-      }
-    },
-    [pageCursors]
-  );
-
-  useEffect(() => {
-    loadPage(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function toggle(id: string) {
     setSelected((s) => {
@@ -152,18 +109,8 @@ export function TrashClient() {
             ))}
           </div>
 
-          {/* 翻页 */}
-          {(page > 1 || hasNext) && (
-            <div className="flex items-center justify-center gap-3 py-4">
-              <Button variant="outline" size="sm" disabled={loading || page === 1} onClick={() => loadPage(page - 1)}>
-                上一页
-              </Button>
-              <span className="min-w-16 text-center text-sm text-muted-foreground">第 {page} 页</span>
-              <Button variant="outline" size="sm" disabled={loading || !hasNext} onClick={() => loadPage(page + 1)}>
-                下一页
-              </Button>
-            </div>
-          )}
+          {/* 翻页：支持输入页码跳转 */}
+          {(page > 1 || hasNext) && <Pager page={page} hasNext={hasNext} disabled={loading} onGo={gotoPage} />}
         </>
       )}
     </div>

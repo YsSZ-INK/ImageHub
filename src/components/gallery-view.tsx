@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { LayoutGrid, Columns3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ImageGrid, EmptyState } from "@/components/image-grid";
+import { Pager } from "@/components/pager";
+import { useCursorPager } from "@/lib/use-cursor-pager";
 import type { ImageDTO } from "@/server/image.service";
 
-// 画廊视图：瀑布流/方格切换 + 游标栈翻页（与「我的图片」一致）
+// 画廊视图：瀑布流/方格切换 + 游标分页（翻页条支持输入页码跳转）
 export function GalleryView({
   initialItems,
   initialCursor,
@@ -22,49 +24,12 @@ export function GalleryView({
   emptyDescription?: string;
   showOwner?: boolean;
 }) {
-  const [items, setItems] = useState(initialItems);
-  const [page, setPage] = useState(1);
-  // 游标栈：pageCursors[i] = 请求第 i+1 页所需的 cursor（首页为 null，第 2 页游标来自服务端首屏）
-  const [pageCursors, setPageCursors] = useState<(string | null)[]>([null, initialCursor]);
-  const [hasNext, setHasNext] = useState(!!initialCursor);
-  const [loading, setLoading] = useState(false);
+  // 游标分页：服务端首屏数据交给 hook，翻页/跳页逻辑统一处理
+  const { items, page, hasNext, loading, gotoPage } = useCursorPager(query, {
+    initialItems,
+    initialCursor,
+  });
   const [layout, setLayout] = useState<"waterfall" | "grid">("waterfall");
-
-  const loadPage = useCallback(
-    async (target: number) => {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams();
-        for (const [k, v] of Object.entries(query)) if (v) params.set(k, v);
-        const c = pageCursors[target - 1];
-        if (c) params.set("cursor", c);
-        const res = await fetch(`/api/images?${params}`);
-        const json = await res.json();
-        if (json.ok) {
-          // 当前页被删空且不是第一页时，回退一页
-          if (json.data.items.length === 0 && target > 1) {
-            setPageCursors((prev) => prev.slice(0, target));
-            setLoading(false);
-            return loadPage(target - 1);
-          }
-          setItems(json.data.items);
-          setPage(target);
-          setHasNext(!!json.data.nextCursor);
-          if (json.data.nextCursor) {
-            setPageCursors((prev) => {
-              const next = [...prev];
-              next[target] = json.data.nextCursor;
-              return next;
-            });
-          }
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        }
-      } finally {
-        setLoading(false);
-      }
-    },
-    [pageCursors, query]
-  );
 
   if (items.length === 0) {
     return <EmptyState title={emptyTitle} description={emptyDescription} />;
@@ -86,17 +51,7 @@ export function GalleryView({
 
       <ImageGrid items={items} layout={layout} showOwner={showOwner} showVisibility={false} />
 
-      {(page > 1 || hasNext) && (
-        <div className="flex items-center justify-center gap-3 py-4">
-          <Button variant="outline" size="sm" disabled={loading || page === 1} onClick={() => loadPage(page - 1)}>
-            上一页
-          </Button>
-          <span className="min-w-16 text-center text-sm text-muted-foreground">第 {page} 页</span>
-          <Button variant="outline" size="sm" disabled={loading || !hasNext} onClick={() => loadPage(page + 1)}>
-            下一页
-          </Button>
-        </div>
-      )}
+      {(page > 1 || hasNext) && <Pager page={page} hasNext={hasNext} disabled={loading} onGo={gotoPage} />}
     </div>
   );
 }

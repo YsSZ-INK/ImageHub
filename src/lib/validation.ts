@@ -69,6 +69,12 @@ export const adminUserUpdateSchema = z.object({
   storageQuotaGB: z.number().min(0.1).max(1024 * 10).optional(),
 });
 
+// 管理员创建用户：复用注册的邮箱/用户名/密码强度校验
+export const adminUserCreateSchema = registerSchema.extend({
+  role: z.enum(["USER", "ADMIN"]).default("USER"),
+  storageQuotaGB: z.number().min(0.1).max(1024 * 10).optional(),
+});
+
 export const adminSettingsSchema = z.object({
   siteName: z.string().min(1).max(50),
   allowRegister: z.boolean(),

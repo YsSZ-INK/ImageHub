@@ -1,6 +1,9 @@
+import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
 import { getStorage } from "@/lib/storage";
+import type { z } from "zod";
+import type { adminUserCreateSchema } from "@/lib/validation";
 
 // ============ 管理后台 ============
 
@@ -28,12 +31,38 @@ export async function adminListUsers(search?: string) {
   }));
 }
 
+// 管理员创建用户（邮箱/用户名查重 + 强密码哈希，角色与配额由管理员指定）
+export async function adminCreateUser(input: z.infer<typeof adminUserCreateSchema>) {
+  const email = input.email.toLowerCase();
+  const existsEmail = await prisma.user.findUnique({ where: { email } });
+  if (existsEmail) throw new AppError("该邮箱已被注册", 409);
+  const existsName = await prisma.user.findUnique({ where: { name: input.name } });
+  if (existsName) throw new AppError("用户名已被占用", 409);
+  const passwordHash = await bcrypt.hash(input.password, 12);
+  return prisma.user.create({
+    data: {
+      email,
+      name: input.name,
+      passwordHash,
+      role: input.role,
+      ...(input.storageQuotaGB !== undefined
+        ? { storageQuota: BigInt(Math.round(input.storageQuotaGB * 1024 ** 3)) }
+        : {}),
+    },
+  });
+}
+
 export async function adminUpdateUser(
   id: string,
   patch: { status?: string; role?: string; storageQuotaGB?: number }
 ) {
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) throw new AppError("用户不存在", 404);
+  // 保护：最后一个管理员不能降级，避免后台失去管理能力
+  if (patch.role === "USER" && user.role === "ADMIN") {
+    const adminCount = await prisma.user.count({ where: { role: "ADMIN" } });
+    if (adminCount <= 1) throw new AppError("不能降级最后一个管理员", 400);
+  }
   return prisma.user.update({
     where: { id },
     data: {
