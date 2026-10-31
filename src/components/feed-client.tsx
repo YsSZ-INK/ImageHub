@@ -6,6 +6,7 @@ import { Loader2, ImagePlus, Send, Trash2, ChevronDown, Play, CalendarDays } fro
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
+import { DateField } from "@/components/date-field";
 import { Lightbox } from "@/components/lightbox";
 import { AvatarFallbackIcon } from "@/components/avatar";
 import { EmptyState } from "@/components/image-grid";
@@ -40,11 +41,11 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
-  // 时间筛选（YYYY-MM-DD，空串表示不限）
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [preset, setPreset] = useState<string | null>(null);
   const fmtLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  // 时间筛选（YYYY-MM-DD）：默认今天
+  const [from, setFrom] = useState(() => fmtLocal(new Date()));
+  const [to, setTo] = useState(() => fmtLocal(new Date()));
+  const [preset, setPreset] = useState<string | null>("今天");
   // 快捷时间区间：一键选定，免去手动输入日期；再点一次取消
   const PRESETS: { label: string; days: number }[] = [
     { label: "今天", days: 0 },
@@ -121,34 +122,36 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
     <div className="mx-auto w-full max-w-3xl space-y-4 xl:max-w-4xl">
       <h1 className="text-xl font-bold">图文动态</h1>
 
-      {/* 时间筛选：快捷区间一键选择，日期框仅用于自定义范围 */}
-      <div className="space-y-2 text-sm">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <CalendarDays className="mr-1 h-4 w-4 text-muted-foreground" />
-          {PRESETS.map((p) => (
-            <button
-              key={p.label}
-              type="button"
-              className={`h-7 rounded-full border px-3 text-xs transition-colors ${
-                preset === p.label
-                  ? "border-transparent bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-              onClick={() => applyPreset(p)}
-            >
-              {p.label}
-            </button>
-          ))}
-          {(from || to) && (
-            <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => { setFrom(""); setTo(""); setPreset(null); }}>
-              清除
-            </Button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Input type="date" className="h-8 w-40" value={from} max={to || undefined} onChange={(e) => { setFrom(e.target.value); setPreset(null); }} />
-          <span className="text-muted-foreground">至</span>
-          <Input type="date" className="h-8 w-40" value={to} min={from || undefined} onChange={(e) => { setTo(e.target.value); setPreset(null); }} />
+      {/* 时间筛选：快捷区间一键选择，日期框仅用于自定义范围（大号控件，逐段输入） */}
+      <div className="rounded-xl border border-foreground/10 bg-background/55 p-4 backdrop-blur-md">
+        <div className="space-y-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <CalendarDays className="mr-1 h-5 w-5 text-muted-foreground" />
+            {PRESETS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                className={`h-9 rounded-full border px-4 text-sm transition-colors ${
+                  preset === p.label
+                    ? "border-transparent bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+                onClick={() => applyPreset(p)}
+              >
+                {p.label}
+              </button>
+            ))}
+            {(from || to) && (
+              <Button variant="ghost" size="sm" className="h-9 px-3 text-sm" onClick={() => { setFrom(""); setTo(""); setPreset(null); }}>
+                清除
+              </Button>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <DateField value={from} onChange={(v) => { setFrom(v); setPreset(null); }} />
+            <span className="text-base text-muted-foreground">至</span>
+            <DateField value={to} onChange={(v) => { setTo(v); setPreset(null); }} />
+          </div>
         </div>
       </div>
 

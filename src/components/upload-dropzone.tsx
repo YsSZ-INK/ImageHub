@@ -1,17 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { UploadCloud, LinkIcon, X, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { cn, formatBytes } from "@/lib/utils";
 
 type UploadState = {
   id: string;
   file: File | null;
   name: string;
+  size: number;
   progress: number;
   status: "pending" | "uploading" | "done" | "error";
   error?: string;
@@ -24,7 +24,6 @@ const MAX_CONCURRENT = 2;
 // onSettled：本批上传全部结束（成功或失败）时触发一次，用于刷新外部列表
 // 传入 albums 时显示「上传到相册」下拉，选中的相册随本批上传一并提交
 export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; albums?: { id: string; name: string }[] }) {
-  const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const [items, setItems] = useState<UploadState[]>([]);
@@ -82,7 +81,7 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
       } catch {
         update(id, { status: "error", error: "服务器响应异常" });
       }
-      router.refresh();
+      // 列表刷新交给 onSettled（本批全部结束后统一就地加载）；侧栏存储卡片由轮询更新
     };
     xhr.onerror = () => {
       settle();
@@ -120,6 +119,7 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
       id: `u${++seqRef.current}`,
       file: f,
       name: f.name,
+      size: f.size,
       progress: 0,
       status: "pending" as const,
     }));
@@ -154,7 +154,7 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
       if (json.ok) {
         toast.success("抓取成功");
         setRemoteUrl("");
-        router.refresh();
+        onSettled?.();
       } else toast.error(json.error || "抓取失败");
     } finally {
       setFetching(false);
@@ -244,7 +244,8 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
                 <div className="flex items-center justify-between gap-2">
                   <p className="truncate text-sm">{item.name}</p>
                   <span className="shrink-0 text-xs text-muted-foreground">
-                    {item.status === "error" ? item.error : `${item.progress}%`}
+                    {formatBytes(item.size)}
+                    {item.status === "error" ? ` · ${item.error}` : ` · ${item.progress}%`}
                   </span>
                 </div>
                 <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">

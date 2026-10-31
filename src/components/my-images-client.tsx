@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown, ZoomIn, Play, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,10 +14,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useCursorPager } from "@/lib/use-cursor-pager";
+import { formatBytes } from "@/lib/utils";
 
 // 我的图片：多选 + 批量操作（删除/移动相册/改可见性）
 export function MyImagesClient({ albums }: { albums: { id: string; name: string }[] }) {
-  const router = useRouter();
   // 游标分页：翻页/跳页逻辑统一在 hook 内
   const { items, page, hasNext, loading, loadPage, gotoPage } = useCursorPager({ scope: "mine" });
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -52,7 +51,7 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
         toast.success(`已处理 ${json.data.affected} 张图片`);
         setSelected(new Set());
         setDialog(null);
-        router.refresh();
+        // 列表就地刷新（ajax）；侧栏存储卡片由 10 秒轮询更新，无需整页刷新
         loadPage(page);
       } else toast.error(json.error);
     } finally {
@@ -257,6 +256,7 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
               >
                 <Link2 className="h-3 w-3 shrink-0" />
                 <span className="truncate">/api/images/{img.id}/raw</span>
+                <span className="ml-auto shrink-0 tabular-nums">{formatBytes(img.size)}</span>
               </button>
             </div>
           ))}

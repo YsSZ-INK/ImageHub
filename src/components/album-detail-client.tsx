@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, FolderMinus, Trash2, X, Pencil, Image as ImageIcon, ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,7 +29,6 @@ export function AlbumDetailClient({
   initialItems: ImageDTO[];
   initialCursor: string | null;
 }) {
-  const router = useRouter();
   const [album, setAlbum] = useState(initialAlbum);
   const [items, setItems] = useState<ImageDTO[]>(initialItems);
   const [cursor, setCursor] = useState(initialCursor);
@@ -85,7 +83,6 @@ export function AlbumDetailClient({
       if (json.ok) {
         toast.success(`已处理 ${json.data.affected} 张图片`);
         setSelected(new Set());
-        router.refresh();
         load(true);
       } else toast.error(json.error);
     } finally {
@@ -108,7 +105,6 @@ export function AlbumDetailClient({
       const json = await res.json();
       if (json.ok) {
         toast.success("已移出相册");
-        router.refresh();
         load(true);
       } else toast.error(json.error);
     } finally {
@@ -134,7 +130,6 @@ export function AlbumDetailClient({
       if (json.ok) {
         toast.success("已设为封面");
         setAlbum((a) => ({ ...a, coverImageId: imgId }));
-        router.refresh();
       } else toast.error(json.error);
     } finally {
       setBatching(false);
@@ -282,7 +277,6 @@ export function AlbumDetailClient({
           } catch {
             // 忽略：下次进入页面会刷新
           }
-          router.refresh();
         }}
       />
     </div>

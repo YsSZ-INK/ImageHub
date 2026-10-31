@@ -134,6 +134,15 @@ input,
 textarea {
   user-select: text;
 }
+/* 日期输入（时间筛选）：正在输入的年/月/日选段蓝底白字，逐段键入更醒目 */
+input[type="date"]::-webkit-datetime-edit-year-field:focus,
+input[type="date"]::-webkit-datetime-edit-month-field:focus,
+input[type="date"]::-webkit-datetime-edit-day-field:focus {
+  background-color: #2563eb;
+  color: #fff;
+  border-radius: 3px;
+  outline: none;
+}
 * {
   scrollbar-width: thin;
   scrollbar-color: hsl(var(--foreground) / 0.22) transparent;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/controls";
 import type { R2SlotConfig, SiteSettings } from "@/lib/settings";
+import type { SyncStatus } from "@/server/r2-sync.service";
 
 // R2 槽位显示名（R2 一 / R2 二 / …）；不能从 @/lib/storage 引（会把 prisma 拖进客户端包）
 const CN_NUM = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
@@ -28,6 +30,7 @@ type MigrationStatus = {
 
 // 站点设置：常规（站点名 / 开放注册 / 上传上限）+ 邮件（SMTP）配置
 export function AdminSettingsClient() {
+  const router = useRouter();
   const [form, setForm] = useState<SiteSettings | null>(null);
   // 上限/端口输入框保留原始字符串，允许清空；保存时才解析，避免清空瞬间被回填 0
   const [maxMbInput, setMaxMbInput] = useState("");
@@ -46,6 +49,9 @@ export function AdminSettingsClient() {
   // 迁移方向：从 / 到（local | r2:<桶下标>）
   const [migFrom, setMigFrom] = useState("local");
   const [migTo, setMigTo] = useState("r2:0");
+  // R2 实时同步状态（每 10 秒轮询展示；后台每 30 秒自动对账）
+  const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [syncing, setSyncing] = useState(false);
   // 备份与还原
   const [restoring, setRestoring] = useState(false);
   const restoreInputRef = useRef<HTMLInputElement>(null);
@@ -130,9 +136,9 @@ export function AdminSettingsClient() {
       });
       const json = await res.json();
       if (json.ok) {
-        toast.success("设置已保存，页面即将刷新");
-        // 刷新以同步侧栏（存储驱动 / R2 桶卡片 / 站点名等）
-        setTimeout(() => window.location.reload(), 800);
+        toast.success("设置已保存");
+        // ajax 局部刷新：RSC 重取同步侧栏（存储驱动 / R2 桶卡片 / 站点名等），不整页 reload
+        router.refresh();
       } else toast.error(json.error);
     } finally {
       setSaving(false);
@@ -276,6 +282,44 @@ export function AdminSettingsClient() {
     }
   }
 
+  // R2 实时同步状态轮询
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      fetch("/api/admin/storage/sync")
+        .then((r) => r.json())
+        .then((json) => {
+          if (alive && json.ok) setSync(json.data as SyncStatus);
+        })
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 10000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+
+  // 立即同步一轮（桶内对象 ⇋ 数据库记录）
+  async function syncNow() {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/admin/storage/sync", { method: "POST" });
+      const json = await res.json();
+      if (json.ok) {
+        const data = json.data as SyncStatus;
+        setSync(data);
+        const adopted = data.slots.reduce((n, s) => n + s.adopted, 0);
+        const removed = data.slots.reduce((n, s) => n + s.removed, 0);
+        const errors = data.slots.filter((s) => s.error);
+        if (errors.length > 0) toast.error(errors.map((s) => `${s.label}：${s.error}`).join("；"));
+        else toast.success(`同步完成：收录 ${adopted} 张，移除 ${removed} 条记录`);
+      } else toast.error(json.error);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   // 备份：直接导航到下载接口，由浏览器流式保存（Content-Disposition attachment）
   function startBackup() {
     if (!confirm("生成备份压缩包（数据库 + 全部存储文件）并下载？")) return;
@@ -313,7 +357,19 @@ export function AdminSettingsClient() {
       const json = await res.json();
       if (json.ok) {
         toast.success(json.data.message);
-        setTimeout(() => window.location.reload(), 1200);
+        // 还原覆盖了全部数据：就地回读设置表单 + RSC 局部刷新，不整页 reload
+        try {
+          const res2 = await fetch("/api/admin/settings");
+          const j2 = await res2.json();
+          if (j2.ok) {
+            setForm(j2.data);
+            setMaxMbInput(String(j2.data.maxUploadMB));
+            setPortInput(j2.data.smtpPort ? String(j2.data.smtpPort) : "");
+          }
+        } catch {
+          // 回读失败不阻塞，下次进入页面会刷新
+        }
+        router.refresh();
       } else toast.error(json.error);
     } catch {
       toast.error("还原请求失败，请重试");
@@ -665,6 +721,30 @@ export function AdminSettingsClient() {
                   </Button>
                 )}
               </div>
+            </div>
+
+            {/* R2 实时同步：桶内对象为事实源，定时双向对账 */}
+            <div className="space-y-2 border-t pt-4">
+              <Label>R2 实时同步</Label>
+              <p className="text-xs text-muted-foreground">
+                每 30 秒自动对账：桶里新增的照片自动收录进网站（公开、归管理员，缩略图回源原对象），
+                桶里被手动删除的照片对应记录自动清除；迁移进行中自动暂停。
+                收录仅针对存在超过 2 分钟的图片/视频对象，以避开上传竞态。
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="outline" onClick={syncNow} disabled={syncing || !!sync?.running}>
+                  {syncing || sync?.running ? <Loader2 className="size-4 animate-spin" /> : null} 立即同步
+                </Button>
+                {sync?.lastRun ? (
+                  <span className="text-xs text-muted-foreground">上次对账：{new Date(sync.lastRun).toLocaleTimeString()}</span>
+                ) : null}
+              </div>
+              {sync?.slots.map((s) => (
+                <p key={s.marker} className="text-xs text-muted-foreground">
+                  {s.label}：桶内 {s.checked} 个对象
+                  {s.error ? ` · 出错：${s.error}` : s.at ? ` · 收录 ${s.adopted}，移除 ${s.removed}` : ""}
+                </p>
+              ))}
             </div>
           </div>
         </CardContent>
