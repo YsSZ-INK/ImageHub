@@ -205,9 +205,16 @@ export async function syncR2Once(): Promise<SyncStatus> {
   }
 }
 
-// 预热：把全部图片的 400px 缩略图与 1600px 预览档拉进 缓存（内存 → 磁盘持久化）
-// 已缓存的直接跳过（无网络请求）；单张失败静默跳过，下轮对账后自动补
+// 预热：把全部图片的 400px 缩略图拉进缓存（内存 → 磁盘持久化）。
+// 2560px 预览档不主动预热（大图缩放是 CPU 重活，小核 VPS 全量预热会把 CPU 打满导致 SSH 饿死），
+// 改为灯箱访问时现场生成一次并进磁盘缓存。
+// 已缓存的直接跳过（无网络请求）；单张失败静默跳过，下轮对账后自动补。
+// 并发自适应：min(2, CPU 核数 - 1)，1-2 核 VPS 单线程跑；每张之间小睡让出 CPU。
 let prewarming = false;
+
+const PREWARM_CONCURRENCY = Math.min(2, Math.max(1, require("os").cpus().length - 1));
+const PREWARM_GAP_MS = PREWARM_CONCURRENCY <= 1 ? 400 : 150;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function prewarmThumbs() {
   if (prewarming) return;
@@ -229,16 +236,13 @@ export async function prewarmThumbs() {
             const raw = await storage.get(img.storageKey);
             return sharp(raw).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
           });
-          await getThumb(`${img.storage}:${img.storageKey}:2560`, async () => {
-            const raw = await storage.get(img.storageKey);
-            return sharp(raw).resize({ width: 2560, withoutEnlargement: true }).webp({ quality: 85 }).toBuffer();
-          });
         } catch {
           // 网络差或文件缺失：跳过，下轮预热补
         }
+        await sleep(PREWARM_GAP_MS);
       }
     };
-    await Promise.all(Array.from({ length: 6 }, worker));
+    await Promise.all(Array.from({ length: PREWARM_CONCURRENCY }, worker));
   } finally {
     prewarming = false;
   }

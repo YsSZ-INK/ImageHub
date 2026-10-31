@@ -20,6 +20,75 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+// R2 实时同步面板：自带 10 秒轮询与手动触发，独立于主表单 state——
+// 状态刷新只重渲染本面板（几十行），不会让整页长表单跟着 re-render（滚动卡顿来源之一）
+function SyncStatusPanel() {
+  const [sync, setSync] = useState<SyncStatus | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      fetch("/api/admin/storage/sync")
+        .then((r) => r.json())
+        .then((json) => {
+          if (alive && json.ok) setSync(json.data as SyncStatus);
+        })
+        .catch(() => {});
+    load();
+    const t = setInterval(load, 10000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+
+  // 立即同步一轮（桶内对象 ⇋ 数据库记录）
+  async function syncNow() {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/admin/storage/sync", { method: "POST" });
+      const json = await res.json();
+      if (json.ok) {
+        const data = json.data as SyncStatus;
+        setSync(data);
+        const adopted = data.slots.reduce((n, s) => n + s.adopted, 0);
+        const removed = data.slots.reduce((n, s) => n + s.removed, 0);
+        const errors = data.slots.filter((s) => s.error);
+        if (errors.length > 0) toast.error(errors.map((s) => `${s.label}：${s.error}`).join("；"));
+        else toast.success(`同步完成：收录 ${adopted} 张，移除 ${removed} 条记录`);
+      } else toast.error(json.error);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 border-t pt-4">
+      <Label>R2 实时同步</Label>
+      <p className="text-xs text-muted-foreground">
+        同步方向永远是「存储桶 → 网站」：桶里新增的照片自动收录进网站（公开、归管理员），
+        桶里被手动删除的照片对应记录自动清除；只增删数据库记录，<strong>绝不会</strong>把本地文件上传到存储桶。
+        每 30 秒对账一次，迁移进行中自动暂停；收录仅针对存在超过 2 分钟的图片/视频对象，以避开上传竞态。
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" onClick={syncNow} disabled={syncing || !!sync?.running}>
+          {syncing || sync?.running ? <Loader2 className="size-4 animate-spin" /> : null} 立即同步
+        </Button>
+        {sync?.lastRun ? (
+          <span className="text-xs text-muted-foreground">上次对账：{new Date(sync.lastRun).toLocaleTimeString()}</span>
+        ) : null}
+      </div>
+      {sync?.slots.map((s) => (
+        <p key={s.marker} className="text-xs text-muted-foreground">
+          {s.label}：桶内 {s.checked} 个对象
+          {s.error ? ` · 出错：${s.error}` : s.at ? ` · 收录 ${s.adopted}，移除 ${s.removed}` : ""}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 // 站点设置：常规（站点名 / 开放注册 / 上传上限）+ 邮件（SMTP）配置
 export function AdminSettingsClient() {
   const router = useRouter();
@@ -36,9 +105,6 @@ export function AdminSettingsClient() {
     running: boolean;
     result: { checked: number; present: number; missing: number; unconfigured: number; missingIds: string[] } | null;
   }>({ running: false, result: null });
-  // R2 实时同步状态（每 10 秒轮询展示；后台每 30 秒自动对账）
-  const [sync, setSync] = useState<SyncStatus | null>(null);
-  const [syncing, setSyncing] = useState(false);
   // 备份与还原
   const [restoring, setRestoring] = useState(false);
   const restoreInputRef = useRef<HTMLInputElement>(null);
@@ -210,44 +276,6 @@ export function AdminSettingsClient() {
     } catch {
       toast.error("清理请求失败，请重试");
       setRc((s) => ({ ...s, running: false }));
-    }
-  }
-
-  // R2 实时同步状态轮询
-  useEffect(() => {
-    let alive = true;
-    const load = () =>
-      fetch("/api/admin/storage/sync")
-        .then((r) => r.json())
-        .then((json) => {
-          if (alive && json.ok) setSync(json.data as SyncStatus);
-        })
-        .catch(() => {});
-    load();
-    const t = setInterval(load, 10000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, []);
-
-  // 立即同步一轮（桶内对象 ⇋ 数据库记录）
-  async function syncNow() {
-    setSyncing(true);
-    try {
-      const res = await fetch("/api/admin/storage/sync", { method: "POST" });
-      const json = await res.json();
-      if (json.ok) {
-        const data = json.data as SyncStatus;
-        setSync(data);
-        const adopted = data.slots.reduce((n, s) => n + s.adopted, 0);
-        const removed = data.slots.reduce((n, s) => n + s.removed, 0);
-        const errors = data.slots.filter((s) => s.error);
-        if (errors.length > 0) toast.error(errors.map((s) => `${s.label}：${s.error}`).join("；"));
-        else toast.success(`同步完成：收录 ${adopted} 张，移除 ${removed} 条记录`);
-      } else toast.error(json.error);
-    } finally {
-      setSyncing(false);
     }
   }
 
@@ -525,7 +553,7 @@ export function AdminSettingsClient() {
       <h1 className="text-xl font-bold">站点设置</h1>
       {/* 单列布局：一张卡片占满一行 */}
       <div className="space-y-4">
-      <Card>
+      <Card className="cv-auto">
         <CardHeader>
           <CardTitle className="text-base">常规</CardTitle>
         </CardHeader>
@@ -559,7 +587,7 @@ export function AdminSettingsClient() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="cv-auto">
         <CardHeader>
           <CardTitle className="text-base">邮件配置</CardTitle>
         </CardHeader>
@@ -632,7 +660,7 @@ export function AdminSettingsClient() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="cv-auto">
         <CardHeader>
           <CardTitle className="text-base">存储设置</CardTitle>
         </CardHeader>
@@ -726,34 +754,13 @@ export function AdminSettingsClient() {
               </div>
             </div>
 
-            {/* R2 实时同步：桶内对象为事实源，定时双向对账 */}
-            <div className="space-y-2 border-t pt-4">
-              <Label>R2 实时同步</Label>
-              <p className="text-xs text-muted-foreground">
-                同步方向永远是「存储桶 → 网站」：桶里新增的照片自动收录进网站（公开、归管理员，缩略图回源原对象），
-                桶里被手动删除的照片对应记录自动清除；只增删数据库记录，<strong>绝不会</strong>把本地文件上传到存储桶。
-                每 30 秒对账一次，迁移进行中自动暂停；收录仅针对存在超过 2 分钟的图片/视频对象，以避开上传竞态。
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outline" onClick={syncNow} disabled={syncing || !!sync?.running}>
-                  {syncing || sync?.running ? <Loader2 className="size-4 animate-spin" /> : null} 立即同步
-                </Button>
-                {sync?.lastRun ? (
-                  <span className="text-xs text-muted-foreground">上次对账：{new Date(sync.lastRun).toLocaleTimeString()}</span>
-                ) : null}
-              </div>
-              {sync?.slots.map((s) => (
-                <p key={s.marker} className="text-xs text-muted-foreground">
-                  {s.label}：桶内 {s.checked} 个对象
-                  {s.error ? ` · 出错：${s.error}` : s.at ? ` · 收录 ${s.adopted}，移除 ${s.removed}` : ""}
-                </p>
-              ))}
-            </div>
+            {/* R2 实时同步：独立子组件（自带 10s 轮询），状态更新只重渲染本面板，不拖累整页长表单 */}
+            <SyncStatusPanel />
           </div>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="cv-auto">
         <CardHeader>
           <CardTitle className="text-base">备份与还原</CardTitle>
         </CardHeader>

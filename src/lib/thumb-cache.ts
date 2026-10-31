@@ -4,8 +4,13 @@
 // - 并发去重：画廊一次挂载几十张缩略图，同 key 回源只发生一次
 import { promises as fs } from "fs";
 import path from "path";
+import os from "os";
 import { createHash } from "crypto";
+import sharp from "sharp";
 import { storageRoot } from "@/lib/storage/local";
+
+// sharp 线程池自适应：1-2 核机器限单线程，避免大图缩放把 CPU 打满（SSH/反代被饿死）
+sharp.concurrency(Math.min(2, Math.max(1, os.cpus().length - 1)));
 
 const MAX_BYTES = 128 * 1024 * 1024;
 

@@ -15,7 +15,7 @@ export const POST = handle(async (req: Request) => {
   const form = await req.formData();
   const file = form.get("file");
   if (!(file instanceof File)) throw new AppError("缺少文件", 400);
-  if (file.size > 5 * 1024 * 1024) throw new AppError("头像最大 5MB", 413);
+  if (file.size > 10 * 1024 * 1024) throw new AppError("头像最大 10MB", 413);
 
   const buf = Buffer.from(await file.arrayBuffer());
   const updated = await updateAvatar(user, buf);

@@ -248,3 +248,9 @@ main {
   content-visibility: auto;
   contain-intrinsic-size: auto 10rem;
 }
+
+/* 长管理页（站点设置等）：屏外大卡片跳过布局与绘制，滚动更轻 */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 360px;
+}
