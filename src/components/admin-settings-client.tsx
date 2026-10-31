@@ -11,22 +11,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/controls";
 import type { R2SlotConfig, SiteSettings } from "@/lib/settings";
 import type { SyncStatus } from "@/server/r2-sync.service";
-
-// R2 槽位显示名（R2 一 / R2 二 / …）；不能从 @/lib/storage 引（会把 prisma 拖进客户端包）
-const CN_NUM = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
-const r2Label = (i: number) => `R2 ${CN_NUM[i] ?? i + 1}`;
-const markerLabel = (m: string) => (m === "local" ? "本地磁盘" : r2Label(Number(m.slice(3)) || 0));
-
-type MigrationStatus = {
-  running: boolean;
-  direction: string | null;
-  done: number;
-  total: number;
-  failed: number;
-  errors: string[];
-  startedAt: number | null;
-  finishedAt: number | null;
-};
+import { SLOT_TYPES, slotConfigured, slotDisplayName, type SlotType } from "@/lib/markers";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // 站点设置：常规（站点名 / 开放注册 / 上传上限）+ 邮件（SMTP）配置
 export function AdminSettingsClient() {
@@ -39,16 +30,11 @@ export function AdminSettingsClient() {
   const [testing, setTesting] = useState(false);
   // R2 连接测试
   const [r2Testing, setR2Testing] = useState(false);
-  // 存量迁移：挂载即拉取一次状态（刷新页面不丢进度），并持续轮询
-  const [mig, setMig] = useState<MigrationStatus | null>(null);
   // R2 记录一致性校验/清理（孤儿记录：数据库有记录、桶里没文件）
   const [rc, setRc] = useState<{
     running: boolean;
     result: { checked: number; present: number; missing: number; unconfigured: number; missingIds: string[] } | null;
   }>({ running: false, result: null });
-  // 迁移方向：从 / 到（local | r2:<桶下标>）
-  const [migFrom, setMigFrom] = useState("local");
-  const [migTo, setMigTo] = useState("r2:0");
   // R2 实时同步状态（每 10 秒轮询展示；后台每 30 秒自动对账）
   const [sync, setSync] = useState<SyncStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -65,32 +51,6 @@ export function AdminSettingsClient() {
         setMaxMbInput(String(json.data.maxUploadMB));
         setPortInput(json.data.smtpPort ? String(json.data.smtpPort) : "");
       });
-  }, []);
-
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const tick = () =>
-      fetch("/api/admin/storage/migrate")
-        .then((r) => r.json())
-        .then((json) => {
-          if (!json.ok) return;
-          setMig((prev) => {
-            const next = json.data as MigrationStatus;
-            if (prev?.running && !next.running && next.total > 0) {
-              if (next.failed > 0)
-                toast.warning(`迁移结束：成功 ${next.done - next.failed}/${next.total}，失败 ${next.failed}（失败图片保留原位置，可重新发起重试）`);
-              else toast.success(`迁移完成：共 ${next.total} 个文件`);
-              // 侧栏存储卡片由 10 秒轮询局部刷新，无需整页 reload
-            }
-            return next;
-          });
-        })
-        .catch(() => {});
-    tick();
-    timer = setInterval(tick, 2000);
-    return () => {
-      if (timer) clearInterval(timer);
-    };
   }, []);
 
   async function save() {
@@ -111,21 +71,21 @@ export function AdminSettingsClient() {
       for (let i = 0; i < form.r2Slots.length; i++) {
         const s = form.r2Slots[i];
         const touched = s.accountId || s.accessKeyId || s.secretAccessKey || s.bucket;
-        const complete = s.accountId && s.accessKeyId && s.bucket && (s.secretAccessKey || s.hasSecret);
+        const complete = slotConfigured(s) && (s.secretAccessKey || s.hasSecret);
         if (touched && !complete) {
-          toast.error(`${r2Label(i)}配置不完整：新桶或修改过密钥时需填写完整四项，已保存的桶留空 Secret 即可`);
+          toast.error(`${slotDisplayName(s, i, form.r2Slots.length)}配置不完整：请按表单提示填写完整，已保存的桶留空 Secret 即可`);
           return;
         }
       }
       if (form.storageDriver === "r2" && form.r2Slots.length === 0) {
-        toast.error("已选择 R2 存储，请先「添加 R2 存储」并配置桶信息");
+        toast.error("已选择对象存储，请先「添加存储」并配置桶信息");
         return;
       }
       if (form.storageDriver === "r2") {
         const idx = Math.min(form.r2UploadSlot, form.r2Slots.length - 1);
         const up = form.r2Slots[idx];
-        if (!(up.accountId && up.accessKeyId && up.bucket && (up.secretAccessKey || up.hasSecret))) {
-          toast.error(`上传目标 ${r2Label(idx)} 配置不完整`);
+        if (!(slotConfigured(up) && (up.secretAccessKey || up.hasSecret))) {
+          toast.error(`上传目标 ${slotDisplayName(up, idx, form.r2Slots.length)} 配置不完整`);
           return;
         }
       }
@@ -161,10 +121,10 @@ export function AdminSettingsClient() {
   // R2 连接测试：用某个桶的当前表单配置真实读写一个探测对象
   // 密钥留空（已保存在服务端）时带 slotIndex，让接口回退用已存的 Secret
   async function testR2(cfg: R2SlotConfig, slotIndex?: number) {
-    const baseOk = cfg.accountId && cfg.accessKeyId && cfg.bucket;
+    const baseOk = (cfg.accountId || cfg.endpoint) && cfg.accessKeyId && cfg.bucket;
     const secretOk = cfg.secretAccessKey || cfg.hasSecret;
     if (!baseOk || !secretOk) {
-      toast.error("请先填写 Account ID / Access Key / Secret / Bucket");
+      toast.error("请先填写 Account ID（或 S3 端点）/ Access Key / Secret / Bucket");
       return;
     }
     setR2Testing(true);
@@ -184,55 +144,25 @@ export function AdminSettingsClient() {
     }
   }
 
-  // 添加一个 R2 存储桶槽位
-  function addSlot() {
+  // 添加一个存储槽位：先选类型（R2 / OSS / COS / S3 兼容），按类型渲染对应表单
+  function addSlot(type: SlotType) {
     if (!form) return;
     if (form.r2Slots.length >= 8) {
-      toast.error("最多添加 8 个 R2 存储桶");
+      toast.error("最多添加 8 个存储桶");
       return;
     }
-    setForm({ ...form, r2Slots: [...form.r2Slots, { accountId: "", accessKeyId: "", secretAccessKey: "", bucket: "" }] });
+    setForm({ ...form, r2Slots: [...form.r2Slots, { type, accountId: "", accessKeyId: "", secretAccessKey: "", bucket: "" }] });
   }
 
   // 删除某个 R2 存储桶槽位（桶内未迁走的文件将无法访问）
   function removeSlot(i: number) {
     if (!form) return;
-    if (!confirm(`删除 ${r2Label(i)} 的配置？\n\n若该桶中仍有图片（未迁移走），删除后这些图片将无法访问。`)) return;
+    if (!confirm(`删除 ${slotDisplayName(form.r2Slots[i], i, form.r2Slots.length)} 的配置？\n\n若该桶中仍有图片（未迁移走），删除后这些图片将无法访问。`)) return;
     const slots = form.r2Slots.filter((_, n) => n !== i);
     let uploadSlot = form.r2UploadSlot;
     if (uploadSlot > i) uploadSlot -= 1;
     if (uploadSlot >= slots.length) uploadSlot = Math.max(slots.length - 1, 0);
     setForm({ ...form, r2Slots: slots, r2UploadSlot: uploadSlot });
-  }
-
-  // 发起存量迁移：任意两个存储位置之间（从 migFrom 到 migTo）
-  async function startMigrate() {
-    const from = migFrom;
-    const to = migTo;
-    if (
-      !confirm(
-        `把存量文件从「${markerLabel(from)}」迁移到「${markerLabel(to)}」？\n\n将逐张复制文件并删除源位置文件，迁移期间请勿上传或删除图片；\n页面或服务重启会中断迁移，未迁移的文件重新发起即可续迁。`
-      )
-    )
-      return;
-    try {
-      const res = await fetch("/api/admin/storage/migrate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from, to }),
-      });
-      const json = await res.json();
-      if (json.ok) {
-        toast.success(`迁移 ${markerLabel(from)} → ${markerLabel(to)} 已开始`);
-        setMig((m) =>
-          m
-            ? { ...m, running: true, done: 0, total: 0, failed: 0, errors: [], finishedAt: null, direction: `${from}>${to}` }
-            : m
-        );
-      } else toast.error(json.error);
-    } catch {
-      toast.error("迁移请求失败，请重试");
-    }
   }
 
   // R2 记录一致性校验：数据库记录 vs 桶内真实对象
@@ -393,20 +323,26 @@ export function AdminSettingsClient() {
   const updSlot = (i: number, patch: Partial<R2SlotConfig>) =>
     setForm({ ...form, r2Slots: form.r2Slots.map((s, n) => (n === i ? { ...s, ...patch } : s)) });
 
-  // 某存储位置是否已具备配置（local 恒为就绪；Secret 已填或已存均可）
-  const slotConfigured = (m: string) => {
-    if (m === "local") return true;
-    const s = form.r2Slots[Number(m.slice(3)) || 0];
-    return !!(s && s.accountId && s.accessKeyId && s.bucket && (s.secretAccessKey || s.hasSecret));
-  };
-
-  // R2 桶配置块（第 i 个槽位）：含「设为上传目标」单选与删除按钮
+  // 存储槽位配置块（第 i 个槽位）：按槽位类型渲染对应表单
+  // R2 恢复原始四项表单；OSS/COS 填 Region（端点自动推导）；S3 兼容手填端点
   const r2Block = (i: number) => {
     const s = form.r2Slots[i];
+    const type = s.type ?? "r2";
+    const typeName = SLOT_TYPES.find((t) => t.type === type)?.name ?? "Cloudflare R2";
+    const secretPlaceholder = s.hasSecret
+      ? "已保存（留空保持不变）"
+      : type === "oss"
+        ? "阿里云 AccessKey Secret"
+        : type === "cos"
+          ? "腾讯云 SecretKey"
+          : "API 令牌的 Secret Access Key";
     return (
       <div className="grid gap-4 rounded-lg border border-border p-4 md:grid-cols-2">
         <div className="flex items-center justify-between md:col-span-2">
-          <p className="text-xs font-medium">{r2Label(i)}</p>
+          <p className="text-xs font-medium">
+            {slotDisplayName(s, i, form.r2Slots.length)}
+            <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground">{typeName}</span>
+          </p>
           <div className="flex items-center gap-4">
             <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
               <input
@@ -426,47 +362,161 @@ export function AdminSettingsClient() {
             </button>
           </div>
         </div>
+
+        {type === "r2" && (
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-account`}>Account ID</Label>
+              <Input
+                id={`r2-${i}-account`}
+                placeholder="R2 概览页的 Account ID（32 位十六进制）"
+                value={s.accountId}
+                onChange={(e) => updSlot(i, { accountId: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-bucket`}>Bucket（存储桶名）</Label>
+              <Input
+                id={`r2-${i}-bucket`}
+                placeholder="如 imagehub"
+                value={s.bucket}
+                onChange={(e) => updSlot(i, { bucket: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-key`}>Access Key ID</Label>
+              <Input
+                id={`r2-${i}-key`}
+                placeholder="R2 API 令牌的 Access Key ID"
+                value={s.accessKeyId}
+                onChange={(e) => updSlot(i, { accessKeyId: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-secret`}>Secret Access Key</Label>
+              <Input
+                id={`r2-${i}-secret`}
+                type="password"
+                placeholder={secretPlaceholder}
+                value={s.secretAccessKey}
+                onChange={(e) => updSlot(i, { secretAccessKey: e.target.value })}
+              />
+            </div>
+          </>
+        )}
+
+        {(type === "oss" || type === "cos") && (
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-region`}>Region（地域）</Label>
+              <Input
+                id={`r2-${i}-region`}
+                placeholder={type === "oss" ? "如 oss-cn-hangzhou" : "如 ap-guangzhou"}
+                value={s.region ?? ""}
+                onChange={(e) => updSlot(i, { region: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-bucket`}>Bucket（存储桶名）</Label>
+              <Input
+                id={`r2-${i}-bucket`}
+                placeholder={type === "cos" ? "如 imagehub-1250000000" : "如 imagehub"}
+                value={s.bucket}
+                onChange={(e) => updSlot(i, { bucket: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-key`}>Access Key ID</Label>
+              <Input
+                id={`r2-${i}-key`}
+                placeholder={type === "oss" ? "阿里云 AccessKey ID" : "腾讯云 SecretId"}
+                value={s.accessKeyId}
+                onChange={(e) => updSlot(i, { accessKeyId: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-secret`}>Access Key Secret</Label>
+              <Input
+                id={`r2-${i}-secret`}
+                type="password"
+                placeholder={secretPlaceholder}
+                value={s.secretAccessKey}
+                onChange={(e) => updSlot(i, { secretAccessKey: e.target.value })}
+              />
+            </div>
+          </>
+        )}
+
+        {type === "s3" && (
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-endpoint`}>S3 端点</Label>
+              <Input
+                id={`r2-${i}-endpoint`}
+                placeholder="如 https://s3.bj.baidubce.com（百度 BOS）或 http://minio.local:9000"
+                value={s.endpoint ?? ""}
+                onChange={(e) => updSlot(i, { endpoint: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-region`}>Region（地域）</Label>
+              <Input
+                id={`r2-${i}-region`}
+                placeholder="如 bj（百度 BOS 北京）/ us-east-1，不确定可留空"
+                value={s.region ?? ""}
+                onChange={(e) => updSlot(i, { region: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-bucket`}>Bucket（存储桶名）</Label>
+              <Input
+                id={`r2-${i}-bucket`}
+                placeholder="如 imagehub"
+                value={s.bucket}
+                onChange={(e) => updSlot(i, { bucket: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-key`}>Access Key ID</Label>
+              <Input
+                id={`r2-${i}-key`}
+                placeholder="S3 兼容存储的 Access Key ID"
+                value={s.accessKeyId}
+                onChange={(e) => updSlot(i, { accessKeyId: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`r2-${i}-secret`}>Secret Access Key</Label>
+              <Input
+                id={`r2-${i}-secret`}
+                type="password"
+                placeholder={secretPlaceholder}
+                value={s.secretAccessKey}
+                onChange={(e) => updSlot(i, { secretAccessKey: e.target.value })}
+              />
+            </div>
+          </>
+        )}
+
         <div className="space-y-1.5">
-          <Label htmlFor={`r2-${i}-account`}>Account ID</Label>
+          <Label htmlFor={`r2-${i}-label`}>显示名（可选）</Label>
           <Input
-            id={`r2-${i}-account`}
-            placeholder="R2 概览页的 Account ID（32 位十六进制）"
-            value={s.accountId}
-            onChange={(e) => updSlot(i, { accountId: e.target.value })}
+            id={`r2-${i}-label`}
+            placeholder={type === "r2" ? "默认 R2 / R2-1 / R2-2…" : "默认 OSS / COS / S3 + 序号"}
+            value={s.label ?? ""}
+            onChange={(e) => updSlot(i, { label: e.target.value })}
           />
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={`r2-${i}-bucket`}>Bucket（存储桶名）</Label>
-          <Input
-            id={`r2-${i}-bucket`}
-            placeholder="如 imagehub"
-            value={s.bucket}
-            onChange={(e) => updSlot(i, { bucket: e.target.value })}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={`r2-${i}-key`}>Access Key ID</Label>
-          <Input
-            id={`r2-${i}-key`}
-            placeholder="R2 API 令牌的 Access Key ID"
-            value={s.accessKeyId}
-            onChange={(e) => updSlot(i, { accessKeyId: e.target.value })}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor={`r2-${i}-secret`}>Secret Access Key</Label>
-          <Input
-            id={`r2-${i}-secret`}
-            type="password"
-            placeholder={s.hasSecret ? "已保存（留空保持不变）" : "R2 API 令牌的 Secret Access Key"}
-            value={s.secretAccessKey}
-            onChange={(e) => updSlot(i, { secretAccessKey: e.target.value })}
-          />
-        </div>
-        <div className="flex items-end md:col-span-2">
+        <div className="flex items-end gap-3">
           <Button variant="outline" onClick={() => testR2(s, i)} disabled={r2Testing}>
             {r2Testing ? <Loader2 className="animate-spin" /> : null} 测试连接
           </Button>
+          <span className="pb-2 text-xs text-muted-foreground">
+            {type === "r2" && "在 Cloudflare → R2 → 管理 R2 API 令牌创建「对象读和写」令牌"}
+            {type === "oss" && "需开通 OSS 并创建 AccessKey；端点按 Region 自动生成"}
+            {type === "cos" && "需开通 COS 并创建密钥；端点按 Region 自动生成"}
+            {type === "s3" && "适用于 MinIO / Wasabi / B2 / 百度 BOS 等 S3 兼容存储；百度 BOS 端点为 https://s3.地域.baidubce.com（北京=bj、广州=gz、苏州=su），AK/SK 在百度智能云「安全认证」页获取"}
+          </span>
         </div>
       </div>
     );
@@ -598,17 +648,31 @@ export function AdminSettingsClient() {
               onChange={(e) => setForm({ ...form, storageDriver: e.target.value as SiteSettings["storageDriver"] })}
             >
               <option value="local">本地磁盘（存放在服务器 VPS 上）</option>
-              <option value="r2">Cloudflare R2（对象存储，不占用 VPS 空间）</option>
+              <option value="r2">对象存储（R2 / OSS / COS / MinIO…，不占用 VPS 空间）</option>
             </Select>
           </div>
 
-          {/* 添加按钮在 R2 桶配置块上方；新桶追加到列表末尾 */}
+          {/* 添加按钮在桶配置块上方：先选存储类型，再按类型填写表单 */}
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" onClick={addSlot} disabled={form.r2Slots.length >= 8}>
-              <Plus className="h-4 w-4" /> 添加 R2 存储
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={form.r2Slots.length >= 8}>
+                  <Plus className="h-4 w-4" /> 添加存储{form.r2Slots.length >= 8 ? "（已达上限）" : ""}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                {SLOT_TYPES.map((t) => (
+                  <DropdownMenuItem key={t.type} onClick={() => addSlot(t.type)}>
+                    <span className="flex flex-col">
+                      <span>{t.name}</span>
+                      <span className="text-xs text-muted-foreground">{t.hint}</span>
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             {form.storageDriver === "r2" && form.r2Slots.length === 0 && (
-              <span className="text-xs text-amber-600">已选择 R2 存储，请添加并配置存储桶后保存</span>
+              <span className="text-xs text-amber-600">已选择对象存储，请添加并配置存储桶后保存</span>
             )}
           </div>
 
@@ -619,9 +683,9 @@ export function AdminSettingsClient() {
           ))}
 
           <p className="text-xs text-muted-foreground">
-            在 Cloudflare 控制台 → R2 → 管理 R2 API 令牌 创建「对象读和写」权限的令牌；桶无需公开访问，图片仍经本站受保护接口对外提供。
+            各存储的密钥获取方式见对应表单下方的提示文字；桶无需公开访问，图片仍经本站受保护接口对外提供。
             每张图片会记录其实际存放位置：切换驱动或勾选其他上传桶只影响新上传，已有文件仍按原位置正常访问与删除；
-            「备份与还原」仅包含本地磁盘上的文件，R2 中的文件请用 Cloudflare 自身机制备份。
+            「备份与还原」仅包含本地磁盘上的文件，对象存储中的文件请用对应云厂商自身机制备份。
           </p>
 
           <div className="flex flex-wrap gap-2">
@@ -630,74 +694,16 @@ export function AdminSettingsClient() {
             </Button>
           </div>
 
+          {/* 存量迁移已独立成页：/admin/migrate（逐张勾选、带存储徽标） */}
           <div className="space-y-3 border-t border-border pt-4">
             <Label>存量图片迁移</Label>
             <p className="text-xs text-muted-foreground">
-              把已上传的文件在 本地磁盘 与各个 R2 桶之间整体搬迁（读源 → 写目标 → 更新记录 → 删除源文件），
-              迁移完成后源位置空间即释放。
+              已独立为「存储迁移」页面：可选源位置与目标位置，逐张勾选要迁移的图片（每张带 本地 / R2 存储徽标），
+              本地照片只有在该页面手动迁移才会进入存储桶。
             </p>
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="mig-from">从</Label>
-                <Select id="mig-from" value={migFrom} onChange={(e) => setMigFrom(e.target.value)}>
-                  <option value="local">本地磁盘</option>
-                  {form.r2Slots.map((_, i) => (
-                    <option key={i} value={`r2:${i}`}>
-                      {r2Label(i)}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="mig-to">到</Label>
-                <Select id="mig-to" value={migTo} onChange={(e) => setMigTo(e.target.value)}>
-                  <option value="local">本地磁盘</option>
-                  {form.r2Slots.map((_, i) => (
-                    <option key={i} value={`r2:${i}`}>
-                      {r2Label(i)}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-              <Button
-                variant="outline"
-                onClick={startMigrate}
-                disabled={!!mig?.running || migFrom === migTo || !slotConfigured(migFrom) || !slotConfigured(migTo)}
-              >
-                开始迁移
-              </Button>
-              {mig?.running && (
-                <span className="flex items-center gap-2 pb-2 text-xs text-muted-foreground">
-                  <Loader2 className="size-3 animate-spin" />
-                  迁移进行中…
-                </span>
-              )}
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => router.push("/admin/migrate")}>打开存储迁移</Button>
             </div>
-            {mig && mig.total > 0 && (
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>
-                    {mig.direction
-                      ? `${markerLabel(mig.direction.split(">")[0])} → ${markerLabel(mig.direction.split(">")[1])}：`
-                      : ""}
-                    {mig.running ? "迁移中" : "已结束"}：{mig.done}/{mig.total}
-                    {mig.failed > 0 ? `，失败 ${mig.failed}` : ""}
-                  </span>
-                  <span>{mig.total > 0 ? `${Math.round((mig.done / mig.total) * 100)}%` : ""}</span>
-                </div>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-foreground transition-all" style={{ width: `${mig.total > 0 ? (mig.done / mig.total) * 100 : 0}%` }} />
-                </div>
-                {mig.errors.length > 0 && (
-                  <div className="text-xs text-red-500">
-                    {mig.errors.slice(0, 3).map((e, i) => (
-                      <p key={i} className="truncate">{e}</p>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* R2 记录一致性校验：数据库记录 vs 桶内真实对象（孤儿记录清理） */}
             <div className="space-y-2 border-t pt-4">
               <Label>记录一致性校验</Label>
@@ -727,9 +733,9 @@ export function AdminSettingsClient() {
             <div className="space-y-2 border-t pt-4">
               <Label>R2 实时同步</Label>
               <p className="text-xs text-muted-foreground">
-                每 30 秒自动对账：桶里新增的照片自动收录进网站（公开、归管理员，缩略图回源原对象），
-                桶里被手动删除的照片对应记录自动清除；迁移进行中自动暂停。
-                收录仅针对存在超过 2 分钟的图片/视频对象，以避开上传竞态。
+                同步方向永远是「存储桶 → 网站」：桶里新增的照片自动收录进网站（公开、归管理员，缩略图回源原对象），
+                桶里被手动删除的照片对应记录自动清除；只增删数据库记录，<strong>绝不会</strong>把本地文件上传到存储桶。
+                每 30 秒对账一次，迁移进行中自动暂停；收录仅针对存在超过 2 分钟的图片/视频对象，以避开上传竞态。
               </p>
               <div className="flex flex-wrap items-center gap-2">
                 <Button variant="outline" onClick={syncNow} disabled={syncing || !!sync?.running}>

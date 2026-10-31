@@ -1,6 +1,6 @@
 # ImageHub —— 自托管私有图床 + 画廊
 
-基于 Next.js 15 (App Router) + React 19 + TypeScript + Prisma 6 + Auth.js v5 + Tailwind CSS 4 构建的单实例自托管图床，全站宣纸质感水墨界面，一张水墨背景贯穿公开页与控制台。
+基于 Next.js 15 (App Router) + React 19 + TypeScript + Prisma 6 + Auth.js v5 + Tailwind CSS 4 构建的单实例自托管图床，支持图片与视频，全站宣纸质感水墨界面，一张水墨背景贯穿公开页与控制台。
 
 ![Build](https://github.com/YsSZ-INK/ImageHub/actions/workflows/docker.yml/badge.svg)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -8,6 +8,8 @@
 ## 目录
 
 - [功能总览](#功能总览)
+- [存储与迁移](#存储与迁移)
+- [上传与分片](#上传与分片)
 - [安全模型](#安全模型)
 - [安装 / 更新 / 卸载](#安装--更新--卸载)
 - [环境变量](#环境变量)
@@ -15,35 +17,89 @@
 - [数据持久化与备份](#数据持久化与备份)
 - [忘记密码](#忘记密码)
 - [本地开发](#本地开发)
-- [双 Schema 说明](#双-schema-说明)
 - [CI/CD](#cicd)
-- [项目结构](#项目结构)
+- [项目结构与页面路由](#项目结构与页面路由)
 - [故障排查](#故障排查)
 
 ## 功能总览
 
-**上传与图片管理**
+**上传与管理**
 
-- 「我的图片」页右上角一键上传：弹窗内支持拖拽 / 点击选择 / 粘贴 / URL 抓取，多文件并发 + 进度条 + 失败重试
-- sha256 秒传去重；自动生成 400px WebP 缩略图与 blurhash 占位；可选全量 jpg/png → WebP 转码（`CONVERT_TO_WEBP`）
-- 魔数校验真实文件类型（不信任浏览器 MIME 声明），EXIF 自动剥离
-- 批量操作栏常驻：删除 / 移动相册 / 设置可见性
-- 图片卡片 hover 复制外链（原图 raw 直链，公开图可直接引用）
+- 拖拽 / 点击选择 / 剪贴板粘贴 / URL 远程抓取，多文件受控并发 + 进度条 + 失败重试
+- 超过 16MB 的大文件自动分片上传（见[上传与分片](#上传与分片)）
+- sha256 秒传去重；图片自动生成 400px WebP 缩略图与 blurhash 占位；可选全量 jpg/png → WebP 转码（`CONVERT_TO_WEBP`）
+- 魔数校验真实文件类型（不信任浏览器 MIME 声明），EXIF 自动剥离（含 GPS）
+- 支持视频 mp4 / webm / mov / mkv：无缩略图时用 `<video>` 取首帧，播放/拖动全程流式 Range，不占服务器内存
+- 「我的图片」支持按存储位置筛选（本地 / 各存储桶）、批量删除 / 移动相册 / 设置可见性
 - 回收站（软删除保留 30 天自动清理）、搜索排序
-
-**相册**
-
-- 相册管理页：封面缩略图卡片、图片数与创建时间、创建 / 编辑 / 删除，点击进入相册
-- 相册详情页（拥有者）：批量移出相册 / 设为封面 / 删除，单图快捷操作与封面徽标，弹窗编辑相册信息
-- 封面图被移出或删除时自动清空相册封面引用
 
 **画廊与浏览**
 
-- 瀑布流 / 方格切换、分页加载、灯箱（键盘 ← → ESC / I）
-- 公共画廊、用户主页（`/u/[username]`）、相册页
-- 全分辨率响应式：移动端横向导航、标准桌面侧栏布局、超大屏 8 列网格
+- 公共画廊瀑布流 + 无限滚动，游标分页带稳定排序（不重不漏）
+- 瀑布流卡片 `content-visibility` 优化，大列表滚动丝滑
+- 灯箱渐进加载：先显示模糊缩略图占位（LQIP），高清原图加载完成后淡入替换；键盘 ← → ESC / I
+- 缩略图双层缓存：服务端内存 LRU（命中免回源对象存储）+ 浏览器缓存一天（过期后台静默刷新）
+- 公共画廊、图文动态、用户主页（`/u/[username]`）、相册页
+- 全分辨率响应式：移动端横向导航、桌面侧栏布局、超大屏 8 列网格
 
-**可见性模型**
+**相册**
+
+- 相册管理页：封面缩略图卡片、创建 / 编辑 / 删除
+- 相册详情页（拥有者）：批量移出相册 / 设为封面 / 删除，封面被移出或删除时自动清空引用
+
+**图文动态**
+
+- 朋友圈式 feed：文字 + 多图，图片可从已有图库挑选或现传
+
+**账号**
+
+- 注册（密码强度校验 + bcrypt）、登录 / 登出、记住我、邮箱验证、找回密码
+- 个人中心（昵称 / 头像 / 密码 / 配额）、账号注销（级联清理存储）
+- 第一个注册的账号自动成为管理员
+
+**后台**（仅 ADMIN）
+
+- 统计面板：用户 / 图片 / 总存储量 / 今日上传 / 待审核 / 回收站 / 存储位置分布 / 上传排行 / 最近注册
+- 用户管理：封禁 / 角色 / 配额 / 删除
+- 图片审核：普通用户上传进入待审核队列，通过后才进画廊（管理员上传免审）
+- 存储迁移：独立页面，任意存储位置之间整体搬迁或逐张勾选迁移，带存储徽标与页码跳转
+- 站点设置：常规 / 存储配置 / 桶同步与一致性校验 / SMTP 邮件 / 备份还原
+
+## 存储与迁移
+
+**多类型存储**：本地磁盘 + 任意数量的 S3 兼容对象存储桶。站点设置 → 添加存储时先选类型，按类型渲染对应表单：
+
+| 类型 | 需填写 |
+| --- | --- |
+| Cloudflare R2 | Account ID（端点自动推导）+ Bucket + Access Key |
+| 阿里云 OSS | Region（端点自动推导）+ Bucket + Access Key |
+| 腾讯云 COS | Region（端点自动推导）+ Bucket + Access Key |
+| S3 兼容（MinIO / Wasabi / B2 / 百度 BOS 等） | 自定义端点 + Region + Bucket + Access Key |
+
+- 桶命名：只添加一个时直接显示类型名（如 `R2`），多个时带序号（`R2-1`、`OSS-2`…）；可自定义显示名，侧栏卡片 / 筛选按钮 / 迁移页徽标统一使用
+- 每张图片记录实际存放位置（`local` 或 `r2:<下标>`），切换配置或删除桶不影响已存文件
+- 上传目标可任选一个桶；新上传进入当前选定位置
+- 桶同步：每 30 秒自动对账桶内对象 ⇋ 数据库记录（收录新文件 / 移除孤儿记录），并提供手动一致性校验与清理
+- 迁移（`/admin/migrate`）：选源与目标 → 真实连通性测试 → 逐张勾选（跨页保持选中）或全部迁移 → 进度轮询；逐张「读源 → 写目标 → 更新记录 → 删源文件」，失败留在原位可重试，任务幂等
+
+## 上传与分片
+
+- 单文件上限：站点设置中可调（1–512MB），受部署级天花板 `MAX_UPLOAD_MB` 约束（取两者较小值）
+- **大文件自动分片**：超过 16MB 自动切换分片上传，5MB/片（前端切片、服务端落盘临时目录 `.chunks/`）
+- **内存占用恒为单片**：合并阶段流式计算 sha256 并拼接，视频流式直传存储（`putStream`），512MB 视频全程不整读内存
+- **断点续传**：uploadId 存 localStorage（文件名 + 大小 + 修改时间识别同一文件），刷新页面或失败重试时只补缺片；单片失败自动重试；手动移除后重新添加同一文件可续传
+- 分片会话 24 小时无活动自动清理（分片目录 + 记录），不泄漏磁盘
+- 去重、配额、审核状态与普通上传完全一致
+
+## 安全模型
+
+- 首页即登录页，全站内容（画廊 / 动态 / 用户主页 / 相册 / 图片详情）仅登录用户可访问
+- 图片二进制一律经 `/api/images/[id]/raw|thumb|download` 受保护路由获取
+- 仅 `PUBLIC` / `UNLISTED` 的 raw/thumb 对匿名放开并携带 `Cache-Control: public` 以启用 CDN 与浏览器缓存；`PRIVATE` 与 download 始终需要登录
+- 上传经限流 + MIME + 魔数双校验；分片上传含会话归属校验（防 IDOR）与分片下标白名单（防路径拼接）
+- 同源校验（`assertSameOrigin`）防 CSRF
+
+### 可见性模型
 
 | 级别 | 页面访问 | raw/thumb 直链 |
 | --- | --- | --- |
@@ -52,23 +108,6 @@
 | `PRIVATE` | 仅本人与管理员 | 仅本人与管理员 |
 
 download 接口始终需要登录，不生成匿名直链 / 签名 URL。
-
-**账号**
-
-- 注册（密码强度校验 + bcrypt）、登录 / 登出、记住我、邮箱验证、找回密码
-- 个人中心（昵称 / 头像 / 密码 / 配额）、账号注销（级联清理存储）
-- 第一个注册的账号自动成为管理员
-
-**后台**（仅 ADMIN）：用户管理（封禁 / 角色 / 配额 / 删除）、图片审核、统计面板、站点设置（常规 / 存储（本地 + 可添加多个 R2 桶）/ SMTP 邮件 / 备份还原）
-
-**其他**：内存 / Redis 限流、深色模式、骨架屏、Toast、空状态、宣纸纹理 + 印章水墨 UI；存储支持本地磁盘 + 多个 Cloudflare R2 桶（站点设置中「添加 R2 存储」动态增删，任选其一为上传目标，任意存储位置之间可整体迁移，按图片记录实际位置读写，切换配置不影响已有文件）
-
-## 安全模型
-
-- 首页即登录页，全站内容（画廊 / 用户主页 / 相册 / 图片详情）仅登录用户可访问
-- 图片二进制一律经 `/api/images/[id]/raw|thumb|download` 受保护路由获取
-- 仅 `PUBLIC` / `UNLISTED` 的 raw/thumb 对匿名放开并携带 `Cache-Control: public` 以启用 CDN 与浏览器缓存；`PRIVATE` 与 download 始终需要登录
-- 上传经限流 + MIME + 魔数双校验；同源校验（`assertSameOrigin`）防 CSRF
 
 ## 安装 / 更新 / 卸载
 
@@ -183,7 +222,7 @@ cd ~/ImageHub && docker compose down -v --rmi all; rm -rf ~/ImageHub
 | `BIND_IP` | - | 端口绑定地址，默认 `127.0.0.1` 仅本机；`0.0.0.0` 对外网开放（见「端口暴露与防火墙」） |
 | `PORT` | - | 宿主机监听端口，默认 3000 |
 | `LOCAL_STORAGE_DIR` | - | 本地存储目录，容器内为 `/app/storage`，默认 `./storage` |
-| `MAX_UPLOAD_MB` | - | 单文件大小上限（MB），默认 50 |
+| `MAX_UPLOAD_MB` | - | 单文件上限的部署级天花板（MB），实际生效 = min(界面设置, 此值)，默认 512 |
 | `CONVERT_TO_WEBP` | - | 是否自动将 jpg/png 转 WebP，默认 false |
 | `REDIS_URL` | - | 可选，配置后限流走 Redis，否则降级为进程内存实现 |
 
@@ -222,19 +261,19 @@ BIND_IP=127.0.0.1 docker compose up -d
 img.example.com {
     reverse_proxy 127.0.0.1:3000
     request_body {
-        max_size 25MB
+        max_size 512MB
     }
 }
 ```
 
-Nginx 需注意调整 `client_max_body_size`（大于上传上限）。
+Nginx 需注意调整 `client_max_body_size`（如 `client_max_body_size 512m;`），不小于站点设置中的「单文件上传上限」。
 
 ## 数据持久化与备份
 
 | 卷 | 内容 |
 | --- | --- |
 | `imagehub_postgres_data` | 数据库（用户 / 图片元数据 / 相册等） |
-| `imagehub_storage_data` | 图片原始文件与缩略图 |
+| `imagehub_storage_data` | 图片与视频原始文件、缩略图、分片临时目录 |
 
 备份：
 
@@ -244,6 +283,8 @@ docker run --rm -v imagehub_storage_data:/data -v $PWD:/backup alpine tar czf /b
 ```
 
 恢复：先 `docker compose down`，还原两个卷后 `docker compose up -d`。
+
+站点设置内置「备份 / 还原」：管理员可一键下载整包备份（数据库 + 全部存储文件，tar.gz），或上传备份整包还原。
 
 ### 常用命令
 
@@ -284,7 +325,7 @@ docker compose exec postgres psql -U imagehub -d imagehub \
 
 日常改密码直接在「个人中心 → 修改密码」操作即可。
 
-## 本地开发（无需 Docker）
+## 本地开发
 
 ```bash
 npm install          # 自动生成 Prisma 客户端（SQLite schema）
@@ -298,11 +339,12 @@ npm run dev          # http://localhost:3000
 
 生产模式本地验证：`npm run build && npm start`（注意 build 脚本使用 SQLite schema 生成客户端，仅适合本地）。
 
-## 双 Schema 说明
+### 双 Schema 说明
 
 - `prisma/schema.prisma` —— PostgreSQL（Docker / 生产），迁移文件基于它生成
 - `prisma/schema.dev.prisma` —— SQLite（本地开发），模型与生产完全一致
 - 为兼容两者，状态字段（role / status / visibility）使用 String + 应用层校验（zod），而非数据库枚举
+- 模型变更需同步修改两个 schema，并在 `prisma/migrations/` 新增迁移目录
 
 ## CI/CD
 
@@ -315,7 +357,7 @@ ghcr.io/yssz-ink/imagehub:sha-<commit>
 
 服务器上 `docker compose pull web && docker compose up -d` 即完成升级。
 
-## 项目结构
+## 项目结构与页面路由
 
 ```
 imagehub/
@@ -326,26 +368,25 @@ imagehub/
 ├── public/                    # 水墨背景图（ink-1~4.png）等静态资源
 ├── src/
 │   ├── app/                   # 页面与 API 路由（App Router，登录页统一在 (console) 路由组）
-│   ├── components/            # UI 组件（相册 / 图片网格 / 上传 / 水墨主题等）
-│   ├── server/                # 业务逻辑（image.service：上传 / 列表 / 相册 / 批量）
-│   ├── lib/                   # 会话 / zod 校验 / 存储驱动 / 限流
+│   ├── components/            # UI 组件（图片网格 / 灯箱 / 上传 / 水墨主题等）
+│   ├── server/                # 业务逻辑（image / storage / migration / chunk-upload 等服务）
+│   ├── lib/                   # 会话 / zod 校验 / 存储驱动 / 分片与缩略图缓存 / 限流
 │   └── middleware.ts          # ink-bg cookie 会话固定背景图
 ├── Dockerfile                 # 多阶段构建（deps → build → runner）
 └── docker-compose.yml         # web + postgres（可选 redis profile）
 ```
 
-## 页面路由
-
 | 地址 | 页面 | 可见性 |
 | --- | --- | --- |
 | `/` | 落地页（登录 / 注册入口） | 公开 |
 | `/gallery` | 公共画廊 | 登录 |
+| `/feed` | 图文动态 | 登录 |
 | `/images`、`/images/[id]` | 我的图片 / 图片详情 | 登录（详情按可见性） |
 | `/albums`、`/albums/[id]` | 相册管理 / 相册页 | 登录（按可见性） |
 | `/trash` | 回收站 | 登录 |
 | `/settings` | 个人中心 | 登录 |
 | `/u/[username]` | 用户主页 | 登录 |
-| `/admin`、`/admin/users`、`/admin/images`、`/admin/settings` | 统计 / 用户 / 图片审核 / 站点设置 | 仅 ADMIN |
+| `/admin`、`/admin/users`、`/admin/images`、`/admin/migrate`、`/admin/settings` | 统计 / 用户 / 图片审核 / 存储迁移 / 站点设置 | 仅 ADMIN |
 
 ## 故障排查
 
@@ -380,7 +421,10 @@ docker compose up -d
 镜像内 Prisma 客户端与 schema 不匹配。确认构建流程先生成 PostgreSQL 客户端（`npx prisma generate --schema prisma/schema.prisma`）再 `next build`。
 
 **上传失败提示超限**
-检查反代的请求体大小限制（Nginx `client_max_body_size` / Caddy `request_body.max_size`）大于 `MAX_UPLOAD_MB`（默认 50，如 Nginx 需 `client_max_body_size 64m;`）；同时确认文件不超过该上限。
+实际生效上限 = min(站点设置「单文件上传上限」, `MAX_UPLOAD_MB`)。检查站点设置中的上限值；再检查反代的请求体大小限制（Nginx `client_max_body_size` / Caddy `request_body.max_size`）不小于该值（如 `client_max_body_size 512m;`）。分片上传同样受此上限约束。
+
+**画廊 / 视频加载慢**
+确认对象存储桶的连通性（站点设置中「测试连接」）；视频播放与首帧走流式 Range，若反代缓存了带 Range 的请求请关闭对该路径的缓冲（Nginx `proxy_buffering off` 对 `/api/images/` 更稳妥）。
 
 ## License
 

@@ -1,7 +1,7 @@
 import { handle, ok } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
-import { r2SlotLabel } from "@/lib/storage";
+import { slotDisplayName } from "@/lib/markers";
 import { storageSnapshot } from "@/server/storage-stats";
 
 export const runtime = "nodejs";
@@ -18,6 +18,6 @@ export const GET = handle(async () => {
   );
   return ok({
     ...snap,
-    slots: snap.slots.map((s, n) => ({ ...s, label: r2SlotLabel(n) })),
+    slots: snap.slots.map((s, n) => ({ ...s, label: slotDisplayName(settings.r2Slots[n], n, settings.r2Slots.length) })),
   });
 });

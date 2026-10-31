@@ -75,8 +75,7 @@ export function DateField({
   const segCls = (i: number) =>
     cn(
       "h-full w-9 bg-transparent text-center text-base tabular-nums outline-none placeholder:text-muted-foreground/50",
-      i === 0 && "w-14",
-      focus === i && "rounded bg-blue-600 text-white placeholder:text-white/70"
+      i === 0 && "w-14"
     );
 
   return (

@@ -1,5 +1,6 @@
 import sharp from "sharp";
 import { createHash, randomBytes } from "crypto";
+import { createReadStream, promises as fs } from "fs";
 import { encode } from "blurhash";
 import { getStorageFor, getLocalStorage, getUploadMarker } from "@/lib/storage";
 import { AppError } from "@/lib/api";
@@ -215,6 +216,47 @@ export async function processAndStoreVideo(
     storage: marker,
     mimeType: mime,
     size: buf.length,
+    width: 0,
+    height: 0,
+    sha256,
+    blurhash: null,
+  };
+}
+
+/**
+ * 视频流式入库（分片上传合并后的临时文件用）：
+ * 魔数校验 → 流式 sha256 → createReadStream 直传存储（putStream），全程不把整个视频读进内存。
+ * sha256 由调用方在合并阶段流式算出后传入，避免重复读盘。
+ */
+export async function processAndStoreVideoFile(
+  filePath: string,
+  size: number,
+  sha256: string,
+  userId: string,
+  originalName: string
+): Promise<ProcessedUpload> {
+  // 读文件头 64 字节做魔数校验（与 detectVideoMime 同口径）
+  const fh = await fs.open(filePath, "r");
+  const head = Buffer.alloc(64);
+  await fh.read(head, 0, 64, 0);
+  await fh.close();
+  const mime = detectVideoMime(head);
+  if (!mime) throw new AppError("不支持的视频格式（仅允许 mp4/webm/mov/mkv）", 415);
+
+  const marker = await getUploadMarker();
+  const storage = await getStorageFor(marker);
+  const rand = randomBytes(4).toString("hex");
+  const ext = ALLOWED_VIDEO_MIMES[mime];
+  const storageKey = `videos/${userId}/${monthKey()}/${sha256.slice(0, 16)}-${rand}.${ext}`;
+  await storage.putStream(storageKey, createReadStream(filePath), { contentType: mime, size });
+
+  return {
+    filename: sanitizeName(originalName),
+    storageKey,
+    thumbKey: "",
+    storage: marker,
+    mimeType: mime,
+    size,
     width: 0,
     height: 0,
     sha256,

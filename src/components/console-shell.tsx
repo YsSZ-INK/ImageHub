@@ -1,6 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
-import { r2SlotLabel } from "@/lib/storage";
+import { slotConfigured, slotDisplayName } from "@/lib/markers";
 import { prisma } from "@/lib/db";
 import { ConsoleTopBar, type NavGroup } from "@/components/console-topbar";
 import { SideNav } from "@/components/side-nav";
@@ -33,6 +33,7 @@ const ADMIN_GROUP: NavGroup = {
     { href: "/admin", label: "统计面板", icon: "layout" },
     { href: "/admin/users", label: "用户管理", icon: "users" },
     { href: "/admin/images", label: "图片审核", icon: "images" },
+    { href: "/admin/migrate", label: "存储迁移", icon: "upload" },
     { href: "/admin/settings", label: "站点设置", icon: "settings" },
   ],
 };
@@ -45,7 +46,7 @@ export async function ConsoleShell({ children }: { children: React.ReactNode }) 
   // 每个配置完整的 R2 桶槽位，底部各显示一张站点级存储用量卡片（R2 弹性容量，只显示已用）
   const r2Slots = settings.r2Slots
     .map((cfg, i) => ({ cfg, i }))
-    .filter(({ cfg }) => cfg.accountId && cfg.accessKeyId && cfg.secretAccessKey && cfg.bucket);
+    .filter(({ cfg }) => cfg.accessKeyId && cfg.bucket && slotConfigured(cfg));
   // 本地磁盘上的图片文件占用（迁移到 R2 后会减少；头像不含在内）
   const localAgg = await prisma.image.aggregate({ _sum: { size: true }, _count: true, where: { storage: "local" } });
   const r2Aggs = r2Slots.length
@@ -58,9 +59,9 @@ export async function ConsoleShell({ children }: { children: React.ReactNode }) 
     quota: Number(user.storageQuota),
     localUsed: Number(localAgg._sum.size ?? 0),
     localCount: localAgg._count,
-    slots: r2Slots.map(({ i }, n) => ({
+    slots: r2Slots.map(({ cfg, i }, n) => ({
       marker: `r2:${i}`,
-      label: r2SlotLabel(i),
+      label: slotDisplayName(cfg, i, settings.r2Slots.length),
       used: Number(r2Aggs[n]._sum.size ?? 0),
       count: r2Aggs[n]._count,
     })),

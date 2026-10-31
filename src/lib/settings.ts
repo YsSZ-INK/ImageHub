@@ -1,12 +1,20 @@
 import { prisma } from "@/lib/db";
+import type { SlotType } from "@/lib/markers";
 
-// 单个 R2 存储桶连接配置（槽位列表存于 settings.r2Slots，JSON 数组）
+// 单个 S3 兼容存储桶连接配置（槽位列表存于 settings.r2Slots，JSON 数组）
+// type 决定表单与端点推导：r2（Account ID）/ oss（Region 推导）/ cos（Region 推导）/ s3（自定义端点）
 // hasSecret 为只读标记：服务端已存有 Secret（Secret 本体永不下发浏览器）
 export type R2SlotConfig = {
+  type?: SlotType;
   accountId: string;
   accessKeyId: string;
   secretAccessKey: string;
   bucket: string;
+  // S3 兼容（MinIO 等）手填端点；OSS/COS 留空按 Region 推导；R2 留空按 Account ID 推导
+  endpoint?: string;
+  region?: string;
+  // 槽位显示名（如「备份桶」），留空按类型与数量自动命名
+  label?: string;
   hasSecret?: boolean;
 };
 
@@ -56,10 +64,14 @@ function parseR2Slots(raw: string | undefined): R2SlotConfig[] | null {
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return null;
     return arr.map((v) => ({
+      type: v?.type === "oss" || v?.type === "cos" || v?.type === "s3" || v?.type === "r2" ? v.type : undefined,
       accountId: typeof v?.accountId === "string" ? v.accountId : "",
       accessKeyId: typeof v?.accessKeyId === "string" ? v.accessKeyId : "",
       secretAccessKey: typeof v?.secretAccessKey === "string" ? v.secretAccessKey : "",
       bucket: typeof v?.bucket === "string" ? v.bucket : "",
+      endpoint: typeof v?.endpoint === "string" ? v.endpoint : "",
+      region: typeof v?.region === "string" ? v.region : "",
+      label: typeof v?.label === "string" ? v.label : "",
     }));
   } catch {
     return null;
@@ -140,10 +152,14 @@ export function sanitizeSettings(s: SiteSettings): SiteSettings {
   return {
     ...s,
     r2Slots: s.r2Slots.map((r) => ({
+      type: r.type,
       accountId: r.accountId,
       accessKeyId: r.accessKeyId,
       secretAccessKey: "",
       bucket: r.bucket,
+      endpoint: r.endpoint ?? "",
+      region: r.region ?? "",
+      label: r.label ?? "",
       hasSecret: !!r.secretAccessKey,
     })),
     smtpPass: "",

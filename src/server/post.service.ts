@@ -52,7 +52,8 @@ export async function listPosts(
           }
         : {}),
     },
-    orderBy: { createdAt: "desc" },
+    // 追加 id 决胜：createdAt 并列时游标翻页才稳定（避免同一动态跨页重复）
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: take + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     include: {

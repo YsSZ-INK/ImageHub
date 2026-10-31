@@ -42,3 +42,14 @@ export function buildSnippets(imageId: string, filename: string, siteUrl: string
     bbcode: `[url=${pageUrl}]${filename}[/url]`,
   };
 }
+
+// 原图预加载（浏览器缓存级去重）：画廊卡片 hover 与灯箱翻页时预取，
+// 让点击/切换时原图已在缓存中，点开即显示高清原图
+const preloaded = new Set<string>();
+
+export function preloadRaw(url: string) {
+  if (preloaded.has(url)) return;
+  preloaded.add(url);
+  const img = new Image();
+  img.src = url;
+}

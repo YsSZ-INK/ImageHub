@@ -156,8 +156,10 @@ input[type="date"]::-webkit-datetime-edit-day-field:focus {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
+  /* 注意：to 帧不写 transform——动画结束 transform 归 none，
+     否则 main 永久携带 translateY(0) 会创建 containing block，
+     使后代 fixed 元素（灯箱）相对 main 而非视口定位 */
 }
 @keyframes fade-in {
   from {
@@ -239,4 +241,10 @@ main {
 .masonry > * {
   break-inside: avoid;
   margin-bottom: 0.75rem;
+  /* 图片加载前占位：否则卡片高度为 0，无限滚动哨兵始终在视口内，
+     会一口气抓取全部页并瞬间挂载数百张卡片，主线程饱和导致页面卡死 */
+  min-height: 10rem;
+  /* 屏外卡片跳过布局与绘制，大幅降低大列表滚动/加载时的主线程占用 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 10rem;
 }

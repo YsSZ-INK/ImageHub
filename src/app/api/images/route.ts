@@ -22,6 +22,7 @@ export const GET = handle(async (req: Request) => {
     sort: (url.searchParams.get("sort") as ListParams["sort"]) ?? "newest",
     cursor: url.searchParams.get("cursor") ?? undefined,
     take: Number(url.searchParams.get("take") ?? 24),
+    storage: url.searchParams.get("storage") ?? undefined,
   });
   return ok({ items, nextCursor });
 });

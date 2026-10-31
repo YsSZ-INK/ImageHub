@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { X, ChevronLeft, ChevronRight, Download, Link2, Info } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Download, Link2, Info, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatBytes, formatDate, buildSnippets } from "@/lib/utils";
+import { formatBytes, formatDate, buildSnippets, preloadRaw } from "@/lib/utils";
 import type { ImageDTO } from "@/server/image.service";
 
 // 灯箱：键盘可操作（← → 切换，ESC 关闭），图片带 alt
@@ -22,8 +23,29 @@ export function Lightbox({
 }) {
   const router = useRouter();
   const [showInfo, setShowInfo] = useState(false);
+  // 灯箱用 Portal 渲染到 body：祖先（main 等）带 transform 时 fixed 会相对祖先而非视口定位，
+  // 导致图片偏移——Portal 保证定位基准永远是视口
+  const [portalReady, setPortalReady] = useState(false);
+  // 加载状态：预览档（2560px）就绪先显示，原图就绪后替换；缓存命中时原图瞬间直出
+  const [previewLoaded, setPreviewLoaded] = useState(false);
+  const [hdLoaded, setHdLoaded] = useState(false);
+  // 原图回源失败（网络差超时）自动重试：key 变化触发重新加载，最多 2 次
+  const [hdRetry, setHdRetry] = useState(0);
   const img = images[index];
   const siteUrl = typeof window !== "undefined" ? window.location.origin : "";
+
+  useEffect(() => {
+    setPreviewLoaded(false);
+    setHdLoaded(false);
+    setHdRetry(0);
+  }, [img?.id]);
+
+  // 相邻原图预取：显示当前图的同时后台加载前后各一张，翻页即显高清
+  useEffect(() => {
+    [images[index + 1], images[index - 1]].forEach((n) => {
+      if (n && !n.mimeType.startsWith("video/")) preloadRaw(n.rawUrl);
+    });
+  }, [index, images]);
 
   const prev = useCallback(
     () => onNavigate((index - 1 + images.length) % images.length),
@@ -46,7 +68,11 @@ export function Lightbox({
     };
   }, [onClose, prev, next]);
 
-  if (!img) return null;
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
+
+  if (!portalReady || !img) return null;
   const snippets = buildSnippets(img.id, img.filename, siteUrl);
 
   async function copyLink() {
@@ -58,7 +84,7 @@ export function Lightbox({
     }
   }
 
-  return (
+  return createPortal(
     <div className="anim-fade-in fixed inset-0 z-50 flex flex-col bg-black/95" role="dialog" aria-label="图片预览">
       <div className="flex items-center justify-between p-3 text-white">
         <span className="text-sm truncate max-w-[50%]">
@@ -107,14 +133,41 @@ export function Lightbox({
             className="anim-zoom-in max-h-full max-w-full"
           />
         ) : (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            key={img.id}
-            src={img.rawUrl}
-            alt={img.filename}
-            className="anim-zoom-in max-h-full max-w-full object-contain select-none"
-            draggable={false}
-          />
+          /* 预览档垫底（1600px WebP，几百 KB，秒级就绪）+ 原图覆盖（就绪后无缝替换）。
+             容器恒定占满内容区、inset-0 m-auto 居中：加载前后图片位置零跳变 */
+          <div className="relative h-full w-full">
+            {!previewLoaded && !hdLoaded && (
+              <Loader2 className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 animate-spin text-white/40" />
+            )}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            {!hdLoaded && (
+              <img
+                key={`${img.id}-pv`}
+                src={`${img.thumbUrl}?w=2560`}
+                alt=""
+                aria-hidden
+                onLoad={() => setPreviewLoaded(true)}
+                className={`anim-zoom-in absolute inset-0 m-auto max-h-full max-w-full object-contain select-none transition-opacity duration-200 ${
+                  previewLoaded ? "opacity-100" : "opacity-0"
+                }`}
+                draggable={false}
+              />
+            )}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              key={`${img.id}-${hdRetry}`}
+              src={img.rawUrl}
+              alt={img.filename}
+              onLoad={() => setHdLoaded(true)}
+              onError={() => {
+                if (hdRetry < 2) setTimeout(() => setHdRetry((n) => n + 1), 8000);
+              }}
+              className={`anim-zoom-in absolute inset-0 m-auto max-h-full max-w-full object-contain select-none transition-opacity duration-300 ${
+                hdLoaded ? "opacity-100" : "opacity-0"
+              }`}
+              draggable={false}
+            />
+          </div>
         )}
         <Button
           variant="ghost"
@@ -136,6 +189,7 @@ export function Lightbox({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

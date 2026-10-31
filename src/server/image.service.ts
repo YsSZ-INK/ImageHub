@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
 import { getStorageFor } from "@/lib/storage";
-import { processAndStoreImage, processAndStoreVideo, detectVideoMime } from "@/lib/image";
+import { processAndStoreImage, processAndStoreVideo, processAndStoreVideoFile, detectVideoMime } from "@/lib/image";
 import { localUsageOf } from "@/server/storage-stats";
 import type { User, Image } from "@prisma/client";
 import type { z } from "zod";
@@ -26,6 +26,7 @@ export type ImageDTO = {
   createdAt: Date;
   blurhash: string | null;
   albumId: string | null;
+  storage: string;
   thumbUrl: string;
   rawUrl: string;
   ownerName?: string;
@@ -45,6 +46,7 @@ export function toDTO(img: Image & { user?: { name: string } }): ImageDTO {
     createdAt: img.createdAt,
     blurhash: img.blurhash,
     albumId: img.albumId,
+    storage: img.storage,
     thumbUrl: `/api/images/${img.id}/thumb`,
     rawUrl: `/api/images/${img.id}/raw`,
     ownerName: img.user?.name,
@@ -186,6 +188,8 @@ export type ListParams = {
   sort?: "newest" | "oldest" | "largest";
   cursor?: string;
   take?: number;
+  // 按存储位置过滤（local / r2:<下标> / r2 / r2b），我的照片筛选用
+  storage?: string;
 };
 
 export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; nextCursor: string | null }> {
@@ -241,10 +245,17 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
       break;
   }
 
+  // 排序追加 id 决胜：createdAt 相同的记录（批量上传/同步收录常见）顺序必须稳定，
+  // 否则游标翻页在并列行上不确定，同一张照片会跨页重复出现
   const orderBy =
-    p.sort === "oldest" ? { createdAt: "asc" as const }
-    : p.sort === "largest" ? { size: "desc" as const }
-    : { createdAt: "desc" as const };
+    p.sort === "oldest" ? [{ createdAt: "asc" as const }, { id: "asc" as const }]
+    : p.sort === "largest" ? [{ size: "desc" as const }, { id: "desc" as const }]
+    : [{ createdAt: "desc" as const }, { id: "desc" as const }];
+
+  if (p.storage) {
+    if (!/^(local|r2(:\d+)?|r2b)$/.test(p.storage)) throw new AppError("无效的存储位置", 400);
+    where.storage = p.storage;
+  }
 
   const rows = await prisma.image.findMany({
     where,

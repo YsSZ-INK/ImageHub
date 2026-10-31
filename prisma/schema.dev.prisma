@@ -28,6 +28,7 @@ model User {
   posts     Post[]
   apiTokens ApiToken[]
   tokens    Token[]
+  uploadSessions UploadSession[]
 }
 
 model Image {
@@ -112,6 +113,24 @@ model Token {
   createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// 分片上传会话：大文件（>16MB）切片上传的会话元数据；分片数据在本地磁盘 .chunks/{id}/ 下
+model UploadSession {
+  id          String   @id @default(cuid())
+  userId      String
+  filename    String
+  size        Int
+  mimeType    String
+  totalChunks Int
+  albumId     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model Setting {

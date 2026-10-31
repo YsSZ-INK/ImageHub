@@ -7,11 +7,14 @@ import { z } from "zod";
 export const runtime = "nodejs";
 
 const schema = z.object({
-  accountId: z.string().min(1, "缺少 Account ID"),
+  accountId: z.string().default(""),
   accessKeyId: z.string().min(1, "缺少 Access Key ID"),
   // 密钥只写不读：表单中留空时通过 slotIndex 回退到服务端已存的 Secret
   secretAccessKey: z.string().default(""),
   bucket: z.string().min(1, "缺少 Bucket"),
+  // 自定义 S3 兼容端点（OSS/COS/MinIO…），留空用 R2；填端点时 Account ID 可留空
+  endpoint: z.string().default(""),
+  region: z.string().default(""),
   slotIndex: z.number().int().min(0).max(7).optional(),
 });
 
@@ -21,6 +24,7 @@ export const POST = handle(async (req: Request) => {
   const viewer = await requireApiUser();
   if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
   const input = schema.parse(await req.json());
+  if (!input.accountId && !input.endpoint) throw new AppError("缺少 Account ID（或自定义端点）", 400);
   let secret = input.secretAccessKey;
   if (!secret) {
     if (input.slotIndex == null) throw new AppError("缺少 Secret Access Key", 400);
@@ -34,6 +38,8 @@ export const POST = handle(async (req: Request) => {
       accessKeyId: input.accessKeyId,
       secretAccessKey: secret,
       bucket: input.bucket,
+      endpoint: input.endpoint || undefined,
+      region: input.region || undefined,
     });
   } catch (err) {
     const e = err as { name?: string; message?: string };
@@ -46,9 +52,9 @@ export const POST = handle(async (req: Request) => {
           : name === "AccessDenied"
             ? "令牌权限不足（需要对象读和写）"
             : name === "NetworkingError" || name === "ENOTFOUND"
-              ? "无法连接到 R2 端点，请检查 Account ID 与服务器网络"
+              ? "无法连接到存储端点，请检查端点 / Account ID 与服务器网络"
               : "连接失败";
-    throw new AppError(`R2 ${hint}（${name || "Error"}）`, 400);
+    throw new AppError(`存储桶 ${hint}（${name || "Error"}）`, 400);
   }
   return ok({ message: "连接成功：端点、密钥与读写权限均正常" });
 });

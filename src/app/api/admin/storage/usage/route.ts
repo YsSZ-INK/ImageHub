@@ -2,7 +2,8 @@ import { handle, ok, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 import { getR2Usage } from "@/lib/storage/r2";
-import { r2SlotIndex, r2SlotLabel } from "@/lib/storage";
+import { r2SlotIndex } from "@/lib/storage";
+import { slotConfigured, slotDisplayName } from "@/lib/markers";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -16,8 +17,8 @@ export const GET = handle(async (req: Request) => {
   const idx = r2SlotIndex(raw);
   const s = await getSettings();
   const cfg = s.r2Slots[idx];
-  if (!cfg || !cfg.accountId || !cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) {
-    throw new AppError(`${r2SlotLabel(idx)}尚未配置完整`, 400);
+  if (!cfg || !cfg.accessKeyId || !cfg.secretAccessKey || !slotConfigured(cfg)) {
+    throw new AppError(`${slotDisplayName(cfg, idx, s.r2Slots.length)}尚未配置完整`, 400);
   }
   try {
     const usage = await getR2Usage(cfg);

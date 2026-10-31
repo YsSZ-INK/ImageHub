@@ -15,11 +15,19 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { useCursorPager } from "@/lib/use-cursor-pager";
 import { formatBytes } from "@/lib/utils";
+import { markerLabel, markerBadgeClass } from "@/lib/markers";
 
-// 我的图片：多选 + 批量操作（删除/移动相册/改可见性）
-export function MyImagesClient({ albums }: { albums: { id: string; name: string }[] }) {
+// 我的图片：多选 + 批量操作（删除/移动相册/改可见性）+ 按存储位置筛选
+export function MyImagesClient({ albums, storages }: { albums: { id: string; name: string }[]; storages: { marker: string; label: string }[] }) {
+  // 存储位置筛选：空 = 全部；切换后 useCursorPager 自动回第一页重新加载
+  const [storage, setStorage] = useState("");
   // 游标分页：翻页/跳页逻辑统一在 hook 内
-  const { items, page, hasNext, loading, loadPage, gotoPage } = useCursorPager({ scope: "mine" });
+  const { items, page, hasNext, loading, loadPage, gotoPage } = useCursorPager({
+    scope: "mine",
+    ...(storage ? { storage } : {}),
+  });
+  // 徽标文案：自定义槽位名优先（与筛选按钮一致），回退默认「R2 一/二/…」
+  const labelOf = (m: string) => storages.find((s) => s.marker === m)?.label ?? markerLabel(m);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batching, setBatching] = useState(false);
   const [dialog, setDialog] = useState<"album" | null>(null);
@@ -84,6 +92,24 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
 
   return (
     <div className="flex min-h-[calc(100vh-6rem)] flex-col space-y-4">
+      {/* 存储位置筛选：全部 / 本地磁盘 / 各个存储桶（自定义名） */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-muted-foreground">位置：</span>
+        <Button size="sm" variant={storage === "" ? "secondary" : "outline"} className="h-8" onClick={() => setStorage("")}>
+          全部
+        </Button>
+        {storages.map((s) => (
+          <Button
+            key={s.marker}
+            size="sm"
+            variant={storage === s.marker ? "secondary" : "outline"}
+            className="h-8"
+            onClick={() => setStorage(s.marker)}
+          >
+            {s.label}
+          </Button>
+        ))}
+      </div>
       {items.length === 0 && !loading ? (
         <>
           {/* 上传入口：按钮弹出上传界面 */}
@@ -92,7 +118,7 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
               <UploadCloud className="h-4 w-4" /> 上传图片 / 视频
             </Button>
           </div>
-          <EmptyState title="还没有图片" description="去上传你的第一张图片吧" />
+          <EmptyState title={storage ? `${labelOf(storage)}还没有图片` : "还没有图片"} description={storage ? "换个位置看看，或上传新图片" : "去上传你的第一张图片吧"} />
         </>
       ) : (
         <>
@@ -256,7 +282,10 @@ export function MyImagesClient({ albums }: { albums: { id: string; name: string 
               >
                 <Link2 className="h-3 w-3 shrink-0" />
                 <span className="truncate">/api/images/{img.id}/raw</span>
-                <span className="ml-auto shrink-0 tabular-nums">{formatBytes(img.size)}</span>
+                <span className={`ml-auto shrink-0 rounded px-1 text-[0.625rem] font-medium ${markerBadgeClass(img.storage)}`}>
+                  {labelOf(img.storage)}
+                </span>
+                <span className="shrink-0 tabular-nums">{formatBytes(img.size)}</span>
               </button>
             </div>
           ))}

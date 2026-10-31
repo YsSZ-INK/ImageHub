@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { ImageDTO } from "@/server/image.service";
 
@@ -113,10 +113,19 @@ export function useCursorPager(
   );
 
   // 无服务端首屏数据时，挂载后加载第一页
+  const mounted = useRef(false);
   useEffect(() => {
     if (!opts?.initialItems) loadPage(1);
+    mounted.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 查询参数变化（如筛选条件切换）→ 回到第一页重新加载
+  useEffect(() => {
+    if (!mounted.current) return; // 首次挂载由上面的 effect 负责，避免重复请求
+    loadPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 
   return { items, page, hasNext, loading, loadPage, gotoPage };
 }

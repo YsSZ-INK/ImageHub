@@ -2,6 +2,8 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
 import { getStorageFor } from "@/lib/storage";
+import { markerLabel, slotDisplayName } from "@/lib/markers";
+import { getSettings } from "@/lib/settings";
 import { deleteAccount } from "@/server/user.service";
 import type { z } from "zod";
 import type { adminUserCreateSchema } from "@/lib/validation";
@@ -144,9 +146,23 @@ export async function adminPurgeImage(id: string) {
   await Promise.allSettled([storage.delete(img.storageKey), storage.delete(img.thumbKey)]);
 }
 
-// 统计面板
+// 统计面板：核心计数 + 7 天趋势 + 存储分布 + 上传 Top5 + 最近注册
 export async function adminStats() {
-  const [userCount, imageCount, storageAgg, recentUploads] = await Promise.all([
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const [
+    userCount,
+    imageCount,
+    storageAgg,
+    recentUploads,
+    todayCount,
+    pendingCount,
+    trashCount,
+    storageGroups,
+    topRows,
+    recentUsers,
+    settings,
+  ] = await Promise.all([
     prisma.user.count(),
     prisma.image.count({ where: { deletedAt: null } }),
     prisma.image.aggregate({ where: { deletedAt: null }, _sum: { size: true } }),
@@ -154,6 +170,26 @@ export async function adminStats() {
       where: { deletedAt: null, createdAt: { gte: new Date(Date.now() - 7 * 24 * 3600_000) } },
       select: { createdAt: true },
     }),
+    prisma.image.count({ where: { deletedAt: null, createdAt: { gte: startOfToday } } }),
+    prisma.image.count({ where: { status: "PENDING", deletedAt: null } }),
+    prisma.image.count({ where: { deletedAt: { not: null } } }),
+    // 存储位置分布：各位置图片数与占用（deletedAt: null 口径）
+    prisma.image.groupBy({ by: ["storage"], where: { deletedAt: null }, _count: true, _sum: { size: true } }),
+    // 上传 Top5 用户（按未删除图片数）
+    prisma.image.groupBy({
+      by: ["userId"],
+      where: { deletedAt: null },
+      _count: true,
+      _sum: { size: true },
+      orderBy: { _count: { userId: "desc" } },
+      take: 5,
+    }),
+    prisma.user.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      select: { name: true, email: true, role: true, createdAt: true },
+    }),
+    getSettings(),
   ]);
 
   // 近 7 天上传趋势
@@ -170,10 +206,46 @@ export async function adminStats() {
     });
   }
 
+  // Top5 用户补名称
+  const topUsers = await prisma.user.findMany({
+    where: { id: { in: topRows.map((r) => r.userId) } },
+    select: { id: true, name: true },
+  });
+  const nameMap = new Map(topUsers.map((u) => [u.id, u.name]));
+
+  // 存储位置标签：现行命名规则；已删除/未配置槽位回退默认名
+  const slotIndex = (m: string) => Number(m.slice(3)) || 0;
   return {
     userCount,
     imageCount,
     totalStorage: (storageAgg._sum.size ?? 0).toString(),
+    todayCount,
+    pendingCount,
+    trashCount,
     trend: days,
+    storageBreakdown: storageGroups
+      .map((g) => {
+        const m = g.storage;
+        const idx = slotIndex(m);
+        const cfg = m.startsWith("r2:") ? settings.r2Slots[idx] : undefined;
+        return {
+          marker: m,
+          label: cfg ? slotDisplayName(cfg, idx, settings.r2Slots.length) : markerLabel(m),
+          count: g._count,
+          size: (g._sum.size ?? 0).toString(),
+        };
+      })
+      .sort((a, b) => Number(b.size) - Number(a.size)),
+    topUploaders: topRows.map((r) => ({
+      name: nameMap.get(r.userId) ?? "已注销用户",
+      count: r._count,
+      size: (r._sum.size ?? 0).toString(),
+    })),
+    recentUsers: recentUsers.map((u) => ({
+      name: u.name,
+      email: u.email,
+      role: u.role,
+      createdAt: u.createdAt.toISOString(),
+    })),
   };
 }

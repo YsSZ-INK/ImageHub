@@ -28,6 +28,7 @@ model User {
   posts     Post[]
   apiTokens ApiToken[]
   tokens    Token[]
+  uploadSessions UploadSession[]
 }
 
 model Image {
@@ -100,6 +101,25 @@ model ApiToken {
   createdAt  DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// 分片上传会话：大文件（>16MB）切片上传的会话元数据；分片数据在本地磁盘 .chunks/{id}/ 下
+// 断点续传以「分片文件是否落盘」为准，会话超 24h 未完成连同分片一并清理
+model UploadSession {
+  id          String   @id @default(cuid())
+  userId      String
+  filename    String
+  size        Int
+  mimeType    String // 浏览器声明的 MIME（仅展示参考，服务端按魔数重新判定）
+  totalChunks Int
+  albumId     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
 }
 
 // 邮箱验证 / 找回密码 令牌

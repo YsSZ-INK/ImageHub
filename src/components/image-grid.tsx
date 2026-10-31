@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ImageOff, Play } from "lucide-react";
 import { Lightbox } from "@/components/lightbox";
 import { VisibilityBadge, ImageActions, RestoreButton } from "@/components/image-actions";
+import { preloadRaw } from "@/lib/utils";
 import type { ImageDTO } from "@/server/image.service";
 
 // 图片网格：waterfall（CSS columns 瀑布流）或 grid（等比方格）
@@ -33,7 +34,7 @@ export function ImageGrid({
   const card = (img: ImageDTO) => (
     <figure
       key={img.id}
-      className="group relative overflow-hidden rounded-xl border border-border/70 bg-muted/30 transition-all duration-300 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-lg hover:shadow-foreground/10"
+      className="group relative overflow-hidden rounded-xl border border-border/70 bg-muted/30 transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-lg hover:shadow-foreground/10"
     >
       {/* 缩略图走受保护路由；blurhash 占位 */}
       {failed.has(img.id) ? (
@@ -61,6 +62,9 @@ export function ImageGrid({
           src={img.thumbUrl}
           alt={img.filename}
           loading="lazy"
+          decoding="async"
+          onMouseEnter={() => preloadRaw(img.rawUrl)}
+          onTouchStart={() => preloadRaw(img.rawUrl)}
           onClick={() => setLightbox(items.indexOf(img))}
           onError={() => setFailed((s) => new Set(s).add(img.id))}
           className={`w-full cursor-zoom-in bg-muted object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03] ${layout === "grid" ? "aspect-square" : ""}`}

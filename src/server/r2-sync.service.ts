@@ -1,8 +1,12 @@
 import { prisma } from "@/lib/db";
-import { getSettings } from "@/lib/settings";
+import { getSettings, type R2SlotConfig } from "@/lib/settings";
 import { S3Client, ListObjectsV2Command, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { migrationStatus } from "@/server/migration.service";
-import { r2SlotLabel } from "@/lib/storage";
+import { makeS3Client } from "@/lib/storage/r2";
+import { getStorageFor } from "@/lib/storage";
+import { slotConfigured, slotDisplayName } from "@/lib/markers";
+import { getThumb } from "@/lib/thumb-cache";
+import sharp from "sharp";
 
 /**
  * R2 双向同步：以桶内对象为事实源，与数据库记录定时对账。
@@ -46,18 +50,22 @@ export function syncStatus(): SyncStatus {
 }
 
 function completeCfg(slot: unknown) {
-  const s = slot as { accountId?: string; accessKeyId?: string; secretAccessKey?: string; bucket?: string } | undefined;
-  return s && s.accountId && s.accessKeyId && s.secretAccessKey && s.bucket
-    ? (s as { accountId: string; accessKeyId: string; secretAccessKey: string; bucket: string })
-    : null;
+  const s = slot as Partial<R2SlotConfig> | undefined;
+  // 槽位有效 = 桶与密钥齐全，且端点可推导（R2 Account ID / OSS·COS Region / S3 端点）
+  return s && s.accessKeyId && s.secretAccessKey && slotConfigured(s) ? (s as R2SlotConfig) : null;
 }
 
-function clientOf(cfg: { accountId: string; accessKeyId: string; secretAccessKey: string; bucket: string }) {
-  return new S3Client({
-    region: "auto",
-    endpoint: `https://${cfg.accountId}.r2.cloudflarestorage.com`,
-    credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
-  });
+function clientOf(cfg: Parameters<typeof makeS3Client>[0]) {
+  return makeS3Client(cfg);
+}
+
+// 槽位对应的全部存储标记：r2:<i> 为现行写法；早期版本遗留 r2（槽一）/ r2b（槽二）。
+// 对账必须把旧标记的记录也算进同一桶，否则会重复收录同一对象
+function slotFamily(index: number): string[] {
+  const family = [`r2:${index}`];
+  if (index === 0) family.push("r2");
+  if (index === 1) family.push("r2b");
+  return family;
 }
 
 async function listAll(client: S3Client, bucket: string): Promise<Map<string, { size: number; lastModified: Date }>> {
@@ -83,10 +91,11 @@ export async function syncR2Once(): Promise<SyncStatus> {
     const owner = await prisma.user.findFirst({ where: { role: "ADMIN" }, select: { id: true } });
     for (let i = 0; i < settings.r2Slots.length; i++) {
       const marker = `r2:${i}`;
-      const st: SlotSyncStatus = { marker, label: r2SlotLabel(i), checked: 0, adopted: 0, removed: 0, error: null, at: null };
+      const family = slotFamily(i);
+      const cfg = completeCfg(settings.r2Slots[i]);
+      const st: SlotSyncStatus = { marker, label: slotDisplayName(cfg, i, settings.r2Slots.length), checked: 0, adopted: 0, removed: 0, error: null, at: null };
       state.slots.push(st);
       try {
-        const cfg = completeCfg(settings.r2Slots[i]);
         if (!cfg) {
           st.error = "未配置完整";
           continue;
@@ -95,16 +104,53 @@ export async function syncR2Once(): Promise<SyncStatus> {
         const objects = await listAll(client, cfg.bucket);
         st.checked = objects.size;
 
-        // 站有桶无 → 删除记录（桶是事实源；回收站软删记录的对象仍在桶里，key 匹配不受影响）
         const records = await prisma.image.findMany({
-          where: { storage: marker },
-          select: { id: true, storageKey: true },
+          where: { storage: { in: family } },
+          select: { id: true, storageKey: true, storage: true, createdAt: true },
         });
-        const known = new Set(records.map((r) => r.storageKey));
-        const missing = records.filter((r) => !objects.has(r.storageKey)).map((r) => r.id);
-        if (missing.length > 0) {
-          const del = await prisma.image.deleteMany({ where: { id: { in: missing }, storage: marker } });
-          st.removed = del.count;
+
+        // 防全灭保护：桶视图异常（网络截断 / 分页中断 / 配置漂移导致空或残缺列表）时绝不批量删除。
+        // 曾发生过 ListObjects 返回空 → 全部记录被误判「桶里没有」而清空的事故；文件在桶里完好，只有记录遭殃
+        if (objects.size === 0 && records.length > 0) {
+          st.error = "桶内对象列表为空，本轮跳过对账（防误删保护）";
+          continue;
+        }
+
+        // 站有桶无 → 删除记录（桶是事实源；回收站软删记录的对象仍在桶里，key 匹配不受影响）。
+        // 记录按槽位全家族标记匹配（含早期 r2/r2b），旧标记记录不会误判为「桶有站无」而重复收录
+        // 自愈重复记录：同一对象 key 建了多条（历史遗留）只保留一条——
+        // 优先现行标记 r2:<i>，否则保留最早创建的；其余删除
+        const byKey = new Map<string, typeof records>();
+        for (const r of records) {
+          const arr = byKey.get(r.storageKey);
+          if (arr) arr.push(r);
+          else byKey.set(r.storageKey, [r]);
+        }
+        const dupIds: string[] = [];
+        for (const arr of byKey.values()) {
+          if (arr.length < 2) continue;
+          arr.sort(
+            (a, b) =>
+              (a.storage === marker ? 0 : 1) - (b.storage === marker ? 0 : 1) ||
+              a.createdAt.getTime() - b.createdAt.getTime()
+          );
+          for (const r of arr.slice(1)) dupIds.push(r.id);
+        }
+        if (dupIds.length > 0) {
+          const del = await prisma.image.deleteMany({ where: { id: { in: dupIds } } });
+          st.removed += del.count;
+        }
+
+        const known = new Set(records.filter((r) => !dupIds.includes(r.id)).map((r) => r.storageKey));
+        const missing = records
+          .filter((r) => !dupIds.includes(r.id) && !objects.has(r.storageKey))
+          .map((r) => r.id);
+        // 大比例缺失同样视为桶视图异常（单桶 > 一半记录同时消失几乎不可能是真实删除）
+        if (missing.length > 0 && records.length > 0 && missing.length >= Math.ceil(records.length / 2)) {
+          st.error = `疑似桶视图异常：${missing.length}/${records.length} 条记录在桶中未找到，本轮跳过删除`;
+        } else if (missing.length > 0) {
+          const del = await prisma.image.deleteMany({ where: { id: { in: missing }, storage: { in: family } } });
+          st.removed += del.count;
         }
 
         // 桶有站无 → 收录（2 分钟前的旧对象 + Head 复核，避开上传/删除竞态；连接测试对象跳过）
@@ -152,6 +198,51 @@ export async function syncR2Once(): Promise<SyncStatus> {
     return syncStatus();
   } finally {
     state.running = false;
+    // 对账完成后异步预热缩略图/预览档到两级缓存（磁盘命中即零网络请求），浏览时不再等 R2 回源
+    void prewarmThumbs().catch(() => {});
+  }
+}
+
+// 预热：把全部图片的 400px 缩略图与 1600px 预览档拉进 缓存（内存 → 磁盘持久化）
+// 已缓存的直接跳过（无网络请求）；单张失败静默跳过，下轮对账后自动补
+let prewarming = false;
+
+export async function prewarmThumbs() {
+  if (prewarming) return;
+  prewarming = true;
+  try {
+    const imgs = await prisma.image.findMany({
+      where: { deletedAt: null, mimeType: { startsWith: "image/" } },
+      select: { id: true, storage: true, storageKey: true, thumbKey: true },
+      orderBy: { createdAt: "desc" },
+    });
+    let idx = 0;
+    const worker = async () => {
+      while (idx < imgs.length) {
+        const img = imgs[idx++];
+        try {
+          const storage = await getStorageFor(img.storage);
+          const adopted = img.thumbKey === img.storageKey;
+          await getThumb(
+            `${img.storage}:${adopted ? `${img.storageKey}:gen400` : img.thumbKey}`,
+            async () => {
+              if (!adopted) return storage.get(img.thumbKey);
+              const raw = await storage.get(img.storageKey);
+              return sharp(raw).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+            }
+          );
+          await getThumb(`${img.storage}:${img.storageKey}:2560`, async () => {
+            const raw = await storage.get(img.storageKey);
+            return sharp(raw).resize({ width: 2560, withoutEnlargement: true }).webp({ quality: 85 }).toBuffer();
+          });
+        } catch {
+          // 网络差或文件缺失：跳过，下轮预热补
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: 6 }, worker));
+  } finally {
+    prewarming = false;
   }
 }
 
