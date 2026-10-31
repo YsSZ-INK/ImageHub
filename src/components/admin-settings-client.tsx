@@ -196,6 +196,27 @@ export function AdminSettingsClient() {
     refreshRedis();
   }, [refreshRedis]);
 
+  const [redisSaving, setRedisSaving] = useState(false);
+  // 独立保存 Redis 配置（开关 + 地址），不随整表单提交；保存后立即刷新连接状态
+  async function saveRedis() {
+    if (!form) return;
+    setRedisSaving(true);
+    try {
+      const res = await fetch("/api/admin/settings/redis", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ redisEnabled: form.redisEnabled, redisUrl: form.redisUrl }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        toast.success("Redis 配置已保存，已生效");
+        await refreshRedis();
+      } else toast.error(json.error);
+    } finally {
+      setRedisSaving(false);
+    }
+  }
+
   async function testRedis(useFormValue: boolean) {
     setRedisTesting(true);
     try {
@@ -739,6 +760,9 @@ export function AdminSettingsClient() {
               </span>
             )}
             {redis?.url && <span className="truncate text-xs text-muted-foreground">{redis.url}</span>}
+            <Button size="sm" onClick={saveRedis} disabled={redisSaving}>
+              {redisSaving ? <Loader2 className="animate-spin" /> : null} 保存配置
+            </Button>
             <Button variant="outline" size="sm" onClick={() => testRedis(false)} disabled={redisTesting}>
               {redisTesting ? <Loader2 className="animate-spin" /> : null} 测试当前配置
             </Button>

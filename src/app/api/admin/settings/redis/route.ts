@@ -1,7 +1,7 @@
 import { handle, assertSameOrigin, ok, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
 import { redisStatus, testRedisUrl, getRedis } from "@/lib/redis";
-import { getSettings } from "@/lib/settings";
+import { getSettings, saveSettings } from "@/lib/settings";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -41,4 +41,19 @@ export const POST = handle(async (req: Request) => {
   }
   const pong = await c.ping();
   return ok({ ok: pong === "PONG", message: pong === "PONG" ? "连接成功，限流已走 Redis" : `异常响应：${pong}` });
+});
+
+// 独立保存 Redis 配置（开关 + 地址），不影响其他站点设置；保存后立即生效
+const saveSchema = z.object({
+  redisEnabled: z.boolean(),
+  redisUrl: z.string().max(255).trim(),
+});
+
+export const PUT = handle(async (req: Request) => {
+  assertSameOrigin(req);
+  const viewer = await requireApiUser();
+  if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+  const body = saveSchema.parse(await req.json());
+  await saveSettings(body);
+  return ok({ saved: true });
 });
