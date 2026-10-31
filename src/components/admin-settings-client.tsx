@@ -38,6 +38,11 @@ export function AdminSettingsClient() {
   const [r2Testing, setR2Testing] = useState(false);
   // 存量迁移：挂载即拉取一次状态（刷新页面不丢进度），并持续轮询
   const [mig, setMig] = useState<MigrationStatus | null>(null);
+  // R2 记录一致性校验/清理（孤儿记录：数据库有记录、桶里没文件）
+  const [rc, setRc] = useState<{
+    running: boolean;
+    result: { checked: number; present: number; missing: number; unconfigured: number; missingIds: string[] } | null;
+  }>({ running: false, result: null });
   // 迁移方向：从 / 到（local | r2:<桶下标>）
   const [migFrom, setMigFrom] = useState("local");
   const [migTo, setMigTo] = useState("r2:0");
@@ -221,6 +226,53 @@ export function AdminSettingsClient() {
       } else toast.error(json.error);
     } catch {
       toast.error("迁移请求失败，请重试");
+    }
+  }
+
+  // R2 记录一致性校验：数据库记录 vs 桶内真实对象
+  async function checkR2() {
+    setRc({ running: true, result: null });
+    try {
+      const res = await fetch("/api/admin/storage/reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check" }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setRc({ running: false, result: json.data });
+        if (json.data.missing > 0) toast.warning(`发现 ${json.data.missing} 条孤儿记录（桶里没有对应文件）`);
+        else toast.success("全部记录与桶内对象一致");
+      } else toast.error(json.error);
+    } catch {
+      toast.error("校验请求失败，请重试");
+      setRc((s) => ({ ...s, running: false }));
+    }
+  }
+
+  // 清理校验出的缺失记录（二次确认）
+  async function cleanR2() {
+    const ids = rc.result?.missingIds ?? [];
+    if (!ids.length) return;
+    if (!confirm(`确定删除 ${ids.length} 条指向不存在文件的记录？\n\n仅删除校验中确认桶内无对应对象的记录，不可恢复。`)) return;
+    setRc((s) => ({ ...s, running: true }));
+    try {
+      const res = await fetch("/api/admin/storage/reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cleanup", ids }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        toast.success(`已清理 ${json.data.cleaned} 条缺失记录`);
+        setRc({ running: false, result: null });
+      } else {
+        toast.error(json.error);
+        setRc((s) => ({ ...s, running: false }));
+      }
+    } catch {
+      toast.error("清理请求失败，请重试");
+      setRc((s) => ({ ...s, running: false }));
     }
   }
 
@@ -589,6 +641,31 @@ export function AdminSettingsClient() {
                 )}
               </div>
             )}
+
+            {/* R2 记录一致性校验：数据库记录 vs 桶内真实对象（孤儿记录清理） */}
+            <div className="space-y-2 border-t pt-4">
+              <Label>记录一致性校验</Label>
+              <p className="text-xs text-muted-foreground">
+                逐个核对指向 R2 的记录与桶内真实对象。若曾在 Cloudflare 后台直接清空过桶，数据库会残留孤儿记录
+                （页面显示有文件、桶里实际没有），可在此校验并清理。清理前请确认上方桶配置与当初写入的桶一致。
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="outline" onClick={checkR2} disabled={rc.running}>
+                  {rc.running ? <Loader2 className="size-4 animate-spin" /> : null} 校验记录与桶一致性
+                </Button>
+                {rc.result && (
+                  <span className="text-xs text-muted-foreground">
+                    共 {rc.result.checked} 条：存在 {rc.result.present}，缺失 {rc.result.missing}
+                    {rc.result.unconfigured > 0 ? `，无法校验（槽位未配置）${rc.result.unconfigured}` : ""}
+                  </span>
+                )}
+                {rc.result && rc.result.missing > 0 && (
+                  <Button variant="destructive" onClick={cleanR2} disabled={rc.running}>
+                    清理 {rc.result.missing} 条缺失记录
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
