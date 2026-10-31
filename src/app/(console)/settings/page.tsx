@@ -1,12 +1,14 @@
 import { requireUser } from "@/lib/session";
 import { localUsageOf } from "@/server/storage-stats";
 import { SettingsClient } from "@/components/settings-client";
+import { AccessPanel } from "@/components/access-panel";
 
 export default async function DashboardSettingsPage() {
   const user = await requireUser();
   // 配额口径：仅统计本地磁盘文件占用（R2 中的文件不占配额）
   const storageUsed = await localUsageOf(user.id);
   return (
+    <div className="space-y-4">
     <SettingsClient
       user={{
         name: user.name,
@@ -17,6 +19,8 @@ export default async function DashboardSettingsPage() {
         storageQuota: user.storageQuota.toString(),
         createdAt: user.createdAt.toISOString(),
       }}
-    />
+      />
+      <AccessPanel />
+    </div>
   );
 }

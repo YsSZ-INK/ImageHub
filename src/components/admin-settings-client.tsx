@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2 } from "lucide-react";
@@ -182,6 +182,36 @@ export function AdminSettingsClient() {
       else toast.error(json.error);
     } finally {
       setTesting(false);
+    }
+  }
+
+  // Redis 连接状态与测试（状态为服务端当前生效连接，保存配置后点测试刷新）
+  const [redis, setRedis] = useState<{ status: string; url: string; error: string; since: string; enabled: boolean } | null>(null);
+  const [redisTesting, setRedisTesting] = useState(false);
+  const refreshRedis = useCallback(async () => {
+    const json = await fetch("/api/admin/settings/redis").then((r) => r.json());
+    if (json.ok) setRedis(json.data);
+  }, []);
+  useEffect(() => {
+    refreshRedis();
+  }, [refreshRedis]);
+
+  async function testRedis(useFormValue: boolean) {
+    setRedisTesting(true);
+    try {
+      const res = await fetch("/api/admin/settings/redis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(useFormValue ? { url: form?.redisUrl ?? "" } : {}),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        if (json.data.ok) toast.success(json.data.message);
+        else toast.error(json.data.message);
+      } else toast.error(json.error);
+      refreshRedis();
+    } finally {
+      setRedisTesting(false);
     }
   }
 
@@ -657,6 +687,66 @@ export function AdminSettingsClient() {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">测试邮件发送至当前管理员邮箱，需先保存配置。</p>
+        </CardContent>
+      </Card>
+
+      <Card className="cv-auto">
+        <CardHeader>
+          <CardTitle className="text-base">Redis 缓存（可选）</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label htmlFor="redis-enabled">启用 Redis</Label>
+              <p className="mt-0.5 text-xs text-muted-foreground">关闭时限流走进程内存（单实例足够），开启后按下方地址连接</p>
+            </div>
+            <Switch
+              id="redis-enabled"
+              checked={form.redisEnabled}
+              onCheckedChange={(v) => setForm({ ...form, redisEnabled: v })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="redis-url">Redis 连接地址</Label>
+            <Input
+              id="redis-url"
+              placeholder="redis://default:密码@主机:6379（Docker 同栈填 redis://redis:6379）"
+              value={form.redisUrl}
+              onChange={(e) => setForm({ ...form, redisUrl: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">
+              留空回退环境变量 REDIS_URL；修改后点「保存配置」生效，无需重启站点。
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {redis && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  redis.status === "connected"
+                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                    : redis.status === "error"
+                      ? "bg-red-500/15 text-red-600 dark:text-red-400"
+                      : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {redis.status === "connected"
+                  ? "已连接 · 限流走 Redis"
+                  : redis.status === "error"
+                    ? "连接失败 · 已降级内存"
+                    : redis.enabled
+                      ? "已启用 · 未连接"
+                      : "未启用 · 内存限流"}
+              </span>
+            )}
+            {redis?.url && <span className="truncate text-xs text-muted-foreground">{redis.url}</span>}
+            <Button variant="outline" size="sm" onClick={() => testRedis(false)} disabled={redisTesting}>
+              {redisTesting ? <Loader2 className="animate-spin" /> : null} 测试当前配置
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => testRedis(true)} disabled={redisTesting || !form.redisUrl.trim()}>
+              {redisTesting ? <Loader2 className="animate-spin" /> : null} 测试上方地址
+            </Button>
+          </div>
+          {redis?.status === "error" && redis.error && <p className="text-xs text-destructive">{redis.error}</p>}
         </CardContent>
       </Card>
 

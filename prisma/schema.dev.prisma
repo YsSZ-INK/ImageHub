@@ -29,6 +29,8 @@ model User {
   apiTokens ApiToken[]
   tokens    Token[]
   uploadSessions UploadSession[]
+  sentAccessRequests     ImageAccessRequest[] @relation("accessRequestsSent")
+  receivedAccessRequests ImageAccessRequest[] @relation("accessRequestsReceived")
 }
 
 model Image {
@@ -89,6 +91,23 @@ model Album {
   images Image[]
 
   @@unique([userId, slug])
+}
+
+// 图片访问授权（申请-审批流）：A 向 B 申请浏览其图片，B 同意后 A 可浏览 B 的全部已发布图片（含 PRIVATE）
+model ImageAccessRequest {
+  id          String    @id @default(cuid())
+  requesterId String // 申请人
+  ownerId     String // 图片主人（审批人）
+  status      String    @default("PENDING") // PENDING 待审批 | APPROVED 已授权 | REJECTED 已拒绝
+  createdAt   DateTime  @default(now())
+  respondedAt DateTime?
+
+  requester User @relation("accessRequestsSent", fields: [requesterId], references: [id], onDelete: Cascade)
+  owner     User @relation("accessRequestsReceived", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, ownerId])
+  @@index([ownerId, status])
+  @@index([requesterId, status])
 }
 
 model ApiToken {

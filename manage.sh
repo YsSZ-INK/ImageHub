@@ -7,7 +7,7 @@
 #   bash manage.sh update   # 直接执行子命令（可省略菜单）
 #
 # 子命令：update | uninstall | port | password | admin | service
-#         | logs | backup | restore | expose | cleanup | info
+#         | logs | backup | restore | expose | cleanup | info | redis
 # ============================================================
 set -euo pipefail
 
@@ -275,6 +275,43 @@ do_info() {
   echo "────────────────────────────────────────────"
 }
 
+# ---------- 13. Redis 启用 / 停用 ----------
+# 两层开关：本菜单管 redis 容器起没起；站点设置里的「Redis 缓存」开关管应用用不用。
+# 任一层关闭，限流都会自动降级为进程内存，不影响站点运行。
+do_redis() {
+  local cur; cur="$(get_env REDIS_URL)"
+  local running="未运行"
+  dc --profile redis ps --status running redis >/dev/null 2>&1 && running="运行中"
+  echo "当前状态：redis 容器 ${running} ｜ .env REDIS_URL：${cur:-（未设置）}"
+  echo "提示：站点设置 → Redis 缓存 里的启用开关也要打开才会真正使用 Redis"
+  echo "1) 启用（写入 REDIS_URL 并启动 redis 容器）"
+  echo "2) 停用（停止 redis 容器，应用自动降级内存限流）"
+  read -rp "选择 [1-2]：" c || c=""
+  case "$c" in
+    1)
+      if [ -n "$cur" ]; then
+        log "REDIS_URL 已设置：${cur}"
+      else
+        printf 'REDIS_URL="redis://redis:6379"\n' >> .env
+        log "已写入 REDIS_URL=redis://redis:6379"
+      fi
+      log "启动 redis 容器并应用配置（web 容器将自动重建以加载环境变量）…"
+      dc --profile redis up -d
+      if wait_health "$PORT"; then
+        log "Redis 容器已启用。请到站点设置 → Redis 缓存 打开「启用 Redis」开关并测试连接"
+      else
+        warn "健康检查超时，请查看日志：bash manage.sh logs"
+      fi
+      ;;
+    2)
+      dc --profile redis stop redis 2>/dev/null || true
+      log "redis 容器已停止（数据保留，再次启用可恢复）"
+      warn "应用连不上 Redis 会自动降级为内存限流；建议到站点设置关闭「启用 Redis」开关以消除连接失败提示"
+      ;;
+    *) err "无效选择" ;;
+  esac
+}
+
 # ---------- 菜单 ----------
 menu() {
   while true; do
@@ -292,8 +329,9 @@ menu() {
     echo " 10) 端口对外开放 / 仅本机 切换"
     echo " 11) 清理本项目旧镜像与查看磁盘占用"
     echo " 12) 站点信息"
+    echo " 13) Redis 启用 / 停用"
     echo "  0) 退出"
-    read -rp "请选择 [0-12]：" c || exit 0
+    read -rp "请选择 [0-13]：" c || exit 0
     case "$c" in
       1) do_update ;;
       2) do_uninstall ;;
@@ -307,6 +345,7 @@ menu() {
       10) do_expose ;;
       11) do_cleanup ;;
       12) do_info ;;
+      13) do_redis ;;
       0|"") exit 0 ;;
       *) warn "无效选择" ;;
     esac
@@ -327,6 +366,7 @@ case "${1:-}" in
   expose) do_expose ;;
   cleanup) do_cleanup ;;
   info) do_info ;;
+  redis) do_redis ;;
   "") menu ;;
-  *) err "未知命令：$1（可用：update/uninstall/port/password/admin/service/logs/backup/restore/expose/cleanup/info）" ;;
+  *) err "未知命令：$1（可用：update/uninstall/port/password/admin/service/logs/backup/restore/expose/cleanup/info/redis）" ;;
 esac

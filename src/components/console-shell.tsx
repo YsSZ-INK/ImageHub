@@ -23,6 +23,7 @@ const MY_GROUPS: NavGroup[] = [
     items: [
       { href: "/gallery", label: "公共画廊", icon: "images" },
       { href: "/feed", label: "图文动态", icon: "news" },
+      { href: "/users", label: "交换图片", icon: "users" },
     ],
   },
 ];

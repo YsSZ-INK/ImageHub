@@ -36,6 +36,10 @@ export type SiteSettings = {
   // 只读标记：服务端已存有 SMTP 授权码（本体永不下发浏览器）
   hasSmtpPass?: boolean;
   smtpFrom: string;
+  // Redis 连接地址（可选，用于限流等多实例共享场景）；留空回退环境变量 REDIS_URL，再无则降级进程内存
+  redisUrl: string;
+  // Redis 启用开关：false 时不连 Redis（限流走进程内存），随时切换、无需重启
+  redisEnabled: boolean;
 };
 
 const EMPTY_SLOT: R2SlotConfig = { accountId: "", accessKeyId: "", secretAccessKey: "", bucket: "" };
@@ -53,6 +57,8 @@ const DEFAULTS: SiteSettings = {
   smtpUser: "",
   smtpPass: "",
   smtpFrom: "",
+  redisUrl: "",
+  redisEnabled: false,
 };
 
 let cache: { value: SiteSettings; expiresAt: number } | null = null;
@@ -114,6 +120,8 @@ export async function getSettings(): Promise<SiteSettings> {
       smtpUser: map.get("smtpUser") ?? "",
       smtpPass: map.get("smtpPass") ?? "",
       smtpFrom: map.get("smtpFrom") ?? "",
+      redisUrl: map.get("redisUrl") ?? "",
+      redisEnabled: map.get("redisEnabled") === "true",
     };
     cache = { value, expiresAt: Date.now() + 60_000 };
     return value;

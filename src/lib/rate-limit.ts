@@ -1,6 +1,9 @@
+import { getRedis } from "@/lib/redis";
+
 /**
- * 限流：进程内存实现（固定窗口计数）。
- * 单实例部署适用；实例重启后计数清零。
+ * 限流：固定窗口计数。
+ * - 站点设置/环境变量配置了 Redis 时用 Redis INCR+PEXPIRE（多实例共享、重启不清零）
+ * - 未配置或 Redis 故障时自动降级为进程内存实现（单实例适用，重启清零）
  */
 type Counter = { count: number; resetAt: number };
 
@@ -11,6 +14,24 @@ export async function rateLimit(
   limit: number,
   windowMs: number
 ): Promise<{ success: boolean; retryAfter: number }> {
+  const r = await getRedis();
+  if (r) {
+    try {
+      const k = `rl:${key}`;
+      const n = await r.incr(k);
+      if (n === 1) await r.pexpire(k, windowMs);
+      let ttl = await r.pttl(k);
+      if (ttl < 0) {
+        // 键无过期（如 Redis 重启前残留）：补上过期时间
+        await r.pexpire(k, windowMs);
+        ttl = windowMs;
+      }
+      return { success: n <= limit, retryAfter: Math.ceil(ttl / 1000) };
+    } catch {
+      // Redis 异常：降级到内存限流
+    }
+  }
+
   const now = Date.now();
   const c = memory.get(key);
   if (!c || c.resetAt < now) {

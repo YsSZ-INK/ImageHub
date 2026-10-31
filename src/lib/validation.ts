@@ -105,6 +105,10 @@ export const adminSettingsSchema = z.object({
   smtpUser: z.string().max(255).trim(),
   smtpPass: z.string().max(255),
   smtpFrom: z.string().max(255).trim(),
+  // Redis 连接地址（可选）：留空回退环境变量 REDIS_URL，再无则限流降级进程内存
+  redisUrl: z.string().max(255).trim(),
+  // Redis 启用开关：false 时不连 Redis（限流走进程内存）
+  redisEnabled: z.boolean(),
 });
 
 export const resetPasswordSchema = z.object({

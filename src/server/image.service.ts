@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
+import { hasAccessTo } from "@/server/access.service";
 import { getStorageFor } from "@/lib/storage";
 import { processAndStoreImage, processAndStoreVideo, processAndStoreVideoFile, detectVideoMime } from "@/lib/image";
 import { localUsageOf } from "@/server/storage-stats";
@@ -63,12 +64,21 @@ export function canView(img: Image, viewer: Viewer | null): boolean {
   return img.visibility === "PUBLIC" || img.visibility === "UNLISTED";
 }
 
-// 单张图片访问校验（防 IDOR）
+// 单张图片访问校验（防 IDOR）。PRIVATE/PENDING 之外再放宽一档：
+// 已获图片主人授权（申请-审批通过）的登录用户可浏览其全部「已发布」图片（含 PRIVATE；待审核仍不可见）
 export async function getImageForView(id: string, viewer: Viewer | null, includeDeleted = false) {
   const img = await prisma.image.findUnique({ where: { id } });
   if (!img) throw new AppError("图片不存在", 404);
   if (!includeDeleted && img.deletedAt) throw new AppError("图片不存在", 404);
-  if (!canView(img, viewer)) throw new AppError("无权访问该图片", viewer ? 403 : 401);
+  if (!canView(img, viewer)) {
+    const granted =
+      !!viewer &&
+      img.status === "PUBLISHED" &&
+      viewer.role !== "ADMIN" &&
+      img.userId !== viewer.id &&
+      (await hasAccessTo(viewer.id, img.userId));
+    if (!granted) throw new AppError("无权访问该图片", viewer ? 403 : 401);
+  }
   return img;
 }
 
@@ -233,8 +243,14 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
       where.userId = target.id;
       where.deletedAt = null;
       if (target.id !== p.viewer.id && p.viewer.role !== "ADMIN") {
-        where.visibility = "PUBLIC";
-        where.status = "PUBLISHED";
+        // 已获授权（申请-审批通过）：可见对方全部已发布图片（含 PRIVATE）；否则仅公开
+        const granted = await hasAccessTo(p.viewer.id, target.id);
+        if (granted) {
+          where.status = "PUBLISHED";
+        } else {
+          where.visibility = "PUBLIC";
+          where.status = "PUBLISHED";
+        }
       }
       break;
     }

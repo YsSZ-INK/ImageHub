@@ -1,5 +1,6 @@
 # Docker Compose：web + postgres（本地磁盘存储）
-# 可选扩展：--profile redis 启用 Redis（默认内存限流，单实例足够）
+# Redis 可选启用：.env 设 REDIS_URL=redis://redis:6379 后 docker compose --profile redis up -d
+# 不启用时限流自动降级进程内存（单实例足够）
 services:
   postgres:
     image: postgres:16-alpine
@@ -16,11 +17,12 @@ services:
       timeout: 5s
       retries: 10
 
-  # ---- 可选：Redis（docker compose --profile redis up -d） ----
+  # ---- 可选：Redis（.env 设 REDIS_URL 后 docker compose --profile redis up -d 启用） ----
   redis:
     image: redis:7-alpine
     profiles: ["redis"]
     restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
     volumes:
       - redis_data:/data
     healthcheck:
@@ -57,7 +59,8 @@ services:
       LOCAL_STORAGE_DIR: /app/storage
       MAX_UPLOAD_MB: "512"
       CONVERT_TO_WEBP: "false"
-      # 留空时限流降级为进程内存实现；启用 Redis 时在 .env 设 REDIS_URL
+      # 默认留空 = 不启用 Redis（限流走进程内存）；启用时在 .env 设 REDIS_URL=redis://redis:6379
+      # 并用 docker compose --profile redis up -d 启动；也可在站点设置里随时改地址（无需重启）
       REDIS_URL: ${REDIS_URL:-}
 
 volumes:
