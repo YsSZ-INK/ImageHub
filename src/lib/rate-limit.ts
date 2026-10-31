@@ -24,8 +24,22 @@ export async function rateLimit(
   };
 }
 
+// 安全员（渗透测试修复）：取客户端 IP。
+// 直连部署（无反代）时 X-Forwarded-For / X-Real-IP 均由客户端随意伪造（实测可轮换绕过限流），
+// 因此默认不信任任何代理头、退化为全局键（fail-closed，全站共享限流窗口，个人站足够）；
+// 部署在 nginx 等反代之后时设置环境变量 TRUST_PROXY=1，此时优先取反代写入的 X-Real-IP，
+// 其次取 X-Forwarded-For 最右一跳（最近的可信代理写入的值），并建议反代配置
+// `proxy_set_header X-Real-IP $remote_addr;` 以获得按 IP 的精细限流。
+const TRUST_PROXY = process.env.TRUST_PROXY === "1";
+
 export function clientIp(req: Request): string {
+  if (!TRUST_PROXY) return "direct";
+  const rip = req.headers.get("x-real-ip");
+  if (rip && rip.trim()) return rip.trim();
   const xf = req.headers.get("x-forwarded-for");
-  if (xf) return xf.split(",")[0].trim();
-  return req.headers.get("x-real-ip") ?? "unknown";
+  if (xf) {
+    const parts = xf.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
+  }
+  return "unknown";
 }

@@ -45,6 +45,13 @@ export default auth((req) => {
   const logged = !!req.auth;
   const role = req.auth?.user?.role;
 
+  // 安全员（渗透测试修复）：/api/* 的路径是 /api/admin/...，
+  // 原 startsWith("/admin") 永远不匹配 API 路由，管理接口只靠路由内守卫兜底——
+  // 这里补一道全局预检，防止未来某个 /api/admin 路由漏写守卫。
+  if (logged && path.startsWith("/api/admin") && role !== "ADMIN") {
+    return NextResponse.json({ ok: false, error: "无权限" }, { status: 403 });
+  }
+
   // 已登录访问首页 → 画廊
   if (logged && path === "/") {
     return NextResponse.redirect(new URL("/gallery", nextUrl));

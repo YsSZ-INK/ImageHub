@@ -16,9 +16,10 @@ export class LocalStorage implements Storage {
   }
 
   private resolve(key: string): string {
-    // 防路径穿越
+    // 防路径穿越（安全员修复）：仅 startsWith 会把 /app/storage-evil 误判为根内子路径，
+    // 解析结果必须是 base 目录本身或位于 base + 路径分隔符之下
     const p = path.resolve(this.base, key);
-    if (!p.startsWith(this.base)) throw new Error("非法存储 key");
+    if (p !== this.base && !p.startsWith(this.base + path.sep)) throw new Error("非法存储 key");
     return p;
   }
 

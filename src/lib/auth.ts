@@ -3,6 +3,12 @@ import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { authConfig } from "@/lib/auth.config";
+import { rateLimit } from "@/lib/rate-limit";
+
+// 安全员（渗透测试修复）：登录接口原本无任何限流，可对单账号无限暴力猜解。
+// 以邮箱维度做固定窗口限流（成功登录也计数，10 次/分钟足够正常使用）。
+const LOGIN_MAX = 10;
+const LOGIN_WINDOW_MS = 60_000;
 
 // 完整 NextAuth 实例（Node 运行时）：Credentials 登录 + JWT 会话
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -23,6 +29,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           remember?: boolean | string;
         };
         if (!email || !password) return null;
+        const rl = await rateLimit(`login:${email.toLowerCase()}`, LOGIN_MAX, LOGIN_WINDOW_MS);
+        if (!rl.success) throw new Error("登录尝试过于频繁，请稍后再试");
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user) return null;
         if (user.status === "BANNED") {
