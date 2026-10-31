@@ -29,6 +29,9 @@ RUN npx next build
 
 # ---------- runner ----------
 FROM base AS runner
+# 标识镜像归属，manage.sh 清理时只删本项目镜像（其他项目不受影响）
+LABEL org.opencontainers.image.source="https://github.com/YsSZ-INK/ImageHub" \
+      org.opencontainers.image.title="ImageHub"
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

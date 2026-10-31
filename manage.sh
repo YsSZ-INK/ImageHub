@@ -46,6 +46,26 @@ wait_health() {
   return 1
 }
 
+# ---------- 本项目镜像的归属标识 ----------
+# 清理时只删属于本项目的悬空镜像（旧版本），其他项目的镜像与构建缓存一律不动：
+#   1) ghcr 拉取的镜像：更新后旧版失去 tag 成为悬空镜像，其 RepoDigests 仍含本仓库路径
+#   2) 本地 compose build 的镜像：通过 Dockerfile 中的 source label 识别
+IMAGE_REPO="yssz-ink/imagehub"
+IMAGE_LABEL_KEY="org.opencontainers.image.source"
+IMAGE_LABEL_VAL="https://github.com/YsSZ-INK/ImageHub"
+
+prune_project_images() {
+  local removed=0 id digests label
+  for id in $(${SUDO} docker images --filter dangling=true -q); do
+    digests="$(${SUDO} docker inspect "$id" --format '{{join .RepoDigests " "}}' 2>/dev/null || true)"
+    label="$(${SUDO} docker inspect "$id" --format "{{index .Config.Labels \"${IMAGE_LABEL_KEY}\"}}" 2>/dev/null || true)"
+    if printf '%s' "$digests" | grep -qi "$IMAGE_REPO" || [ "$label" = "$IMAGE_LABEL_VAL" ]; then
+      ${SUDO} docker rmi -f "$id" >/dev/null 2>&1 && removed=$((removed+1)) || true
+    fi
+  done
+  log "已清理本项目旧镜像 ${removed} 个（其他项目的镜像与缓存未受影响）"
+}
+
 # web 容器挂载的存储卷名（动态获取，避免项目名不一致）
 storage_volume() {
   dc ps -q web >/dev/null 2>&1 || return 1
@@ -64,8 +84,8 @@ do_update() {
   dc pull web
   log "重启服务 …"
   dc up -d
-  log "清理旧版本悬空镜像 …"
-  ${SUDO} docker image prune -f
+  log "清理本项目旧版本镜像 …"
+  prune_project_images
   log "等待服务就绪 …"
   if wait_health "$PORT"; then
     log "更新完成：http://127.0.0.1:${PORT}"
@@ -231,8 +251,8 @@ do_expose() {
 
 # ---------- 11. 清理 ----------
 do_cleanup() {
-  log "清理悬空镜像 …"
-  ${SUDO} docker image prune -f
+  log "清理本项目旧版本镜像（其他项目不受影响）…"
+  prune_project_images
   log "当前 Docker 磁盘占用："
   ${SUDO} docker system df
 }
@@ -270,7 +290,7 @@ menu() {
     echo "  8) 备份数据（数据库 + 图片）"
     echo "  9) 还原数据（从备份）"
     echo " 10) 端口对外开放 / 仅本机 切换"
-    echo " 11) 清理悬空镜像与查看磁盘占用"
+    echo " 11) 清理本项目旧镜像与查看磁盘占用"
     echo " 12) 站点信息"
     echo "  0) 退出"
     read -rp "请选择 [0-12]：" c || exit 0
