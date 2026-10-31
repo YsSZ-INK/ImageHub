@@ -158,6 +158,8 @@ export async function syncR2Once(): Promise<SyncStatus> {
         if (owner) {
           for (const [key, obj] of objects) {
             if (known.has(key) || key.startsWith("__imagehub")) continue;
+            // thumbs/ 是原图记录自带的缩略图对象，不是独立照片，不收录
+            if (key.startsWith("thumbs/")) continue;
             if (obj.lastModified.getTime() > cutoff) continue;
             const ext = (key.split(".").pop() ?? "").toLowerCase();
             if (!EXT_MIME[ext]) continue;
@@ -222,15 +224,11 @@ export async function prewarmThumbs() {
         const img = imgs[idx++];
         try {
           const storage = await getStorageFor(img.storage);
-          const adopted = img.thumbKey === img.storageKey;
-          await getThumb(
-            `${img.storage}:${adopted ? `${img.storageKey}:gen400` : img.thumbKey}`,
-            async () => {
-              if (!adopted) return storage.get(img.thumbKey);
-              const raw = await storage.get(img.storageKey);
-              return sharp(raw).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
-            }
-          );
+          // 缩略图不再作为桶对象：统一从原图现场生成（本地缓存命中则零回源）
+          await getThumb(`${img.storage}:${img.storageKey}:gen400`, async () => {
+            const raw = await storage.get(img.storageKey);
+            return sharp(raw).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+          });
           await getThumb(`${img.storage}:${img.storageKey}:2560`, async () => {
             const raw = await storage.get(img.storageKey);
             return sharp(raw).resize({ width: 2560, withoutEnlargement: true }).webp({ quality: 85 }).toBuffer();

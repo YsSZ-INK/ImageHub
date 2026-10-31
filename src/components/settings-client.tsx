@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Loader2, Upload, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/password-input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { AvatarFallbackIcon } from "@/components/avatar";
@@ -233,11 +234,11 @@ export function SettingsClient({ user }: Props) {
           <CardContent className="space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="cur-pwd">当前密码</Label>
-              <Input id="cur-pwd" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
+              <PasswordInput id="cur-pwd" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="new-pwd">新密码（至少 8 位，含大小写字母和数字）</Label>
-              <Input id="new-pwd" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+              <PasswordInput id="new-pwd" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
             </div>
             <Button onClick={changePassword} disabled={savingPwd || !currentPassword || !newPassword}>
               {savingPwd ? <Loader2 className="animate-spin" /> : null} 更新密码

@@ -219,10 +219,3 @@ export async function completeChunkUpload(user: User, id: string): Promise<Image
   await cleanupSession(id);
   return toDTO(img);
 }
-
-// 放弃会话（前端显式取消时调用，立即释放分片磁盘占用）
-export async function abortChunkUpload(user: User, id: string) {
-  await ownSession(id, user);
-  await cleanupSession(id);
-  return { ok: true };
-}

@@ -84,3 +84,23 @@ export function getThumb(key: string, loader: () => Promise<Buffer>): Promise<Bu
   inflight.set(key, task);
   return task;
 }
+
+// 上传时已生成好缩略图：直接进两级缓存，首次访问零生成
+export function prewriteThumb(key: string, buf: Buffer) {
+  store(key, buf);
+  void writeDisk(key, buf);
+}
+
+// 一天一清：本地缩略图缓存每天整目录清空一次，之后访问自动从原图重建
+const CLEAN_MS = 24 * 60 * 60 * 1000;
+async function cleanAll() {
+  map.clear();
+  inflight.clear();
+  totalBytes = 0;
+  try {
+    await fs.rm(path.join(storageRoot(), ".thumbs"), { recursive: true, force: true });
+  } catch {
+    // 清理失败不影响服务
+  }
+}
+void setInterval(() => void cleanAll(), CLEAN_MS).unref();

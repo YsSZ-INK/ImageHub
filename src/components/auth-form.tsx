@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
+import { PasswordInput } from "@/components/password-input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/controls";
 import Link from "next/link";
@@ -98,9 +99,8 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="password">密码</Label>
-            <Input
+            <PasswordInput
               id="password"
-              type="password"
               required
               autoComplete="current-password"
               value={loginData.password}
@@ -156,9 +156,8 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="reg-password">密码</Label>
-              <Input
+              <PasswordInput
                 id="reg-password"
-                type="password"
                 required
                 value={regData.password}
                 onChange={(e) => setRegData({ ...regData, password: e.target.value })}

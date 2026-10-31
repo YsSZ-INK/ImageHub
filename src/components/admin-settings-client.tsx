@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/controls";
 import type { R2SlotConfig, SiteSettings } from "@/lib/settings";
 import type { SyncStatus } from "@/server/r2-sync.service";
 import { SLOT_TYPES, slotConfigured, slotDisplayName, type SlotType } from "@/lib/markers";
+import { PasswordInput } from "@/components/password-input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -394,9 +395,8 @@ export function AdminSettingsClient() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`r2-${i}-secret`}>Secret Access Key</Label>
-              <Input
+              <PasswordInput
                 id={`r2-${i}-secret`}
-                type="password"
                 placeholder={secretPlaceholder}
                 value={s.secretAccessKey}
                 onChange={(e) => updSlot(i, { secretAccessKey: e.target.value })}
@@ -436,9 +436,8 @@ export function AdminSettingsClient() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`r2-${i}-secret`}>Access Key Secret</Label>
-              <Input
+              <PasswordInput
                 id={`r2-${i}-secret`}
-                type="password"
                 placeholder={secretPlaceholder}
                 value={s.secretAccessKey}
                 onChange={(e) => updSlot(i, { secretAccessKey: e.target.value })}
@@ -487,9 +486,8 @@ export function AdminSettingsClient() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={`r2-${i}-secret`}>Secret Access Key</Label>
-              <Input
+              <PasswordInput
                 id={`r2-${i}-secret`}
-                type="password"
                 placeholder={secretPlaceholder}
                 value={s.secretAccessKey}
                 onChange={(e) => updSlot(i, { secretAccessKey: e.target.value })}
@@ -606,9 +604,8 @@ export function AdminSettingsClient() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="smtp-pass">密码 / 授权码</Label>
-            <Input
+            <PasswordInput
               id="smtp-pass"
-              type="password"
               placeholder={form.hasSmtpPass ? "已保存（留空保持不变）" : "邮箱服务方的授权码"}
               value={form.smtpPass}
               onChange={(e) => setForm({ ...form, smtpPass: e.target.value })}

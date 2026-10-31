@@ -3,6 +3,7 @@ import { createHash, randomBytes } from "crypto";
 import { createReadStream, promises as fs } from "fs";
 import { encode } from "blurhash";
 import { getStorageFor, getLocalStorage, getUploadMarker } from "@/lib/storage";
+import { prewriteThumb } from "@/lib/thumb-cache";
 import { AppError } from "@/lib/api";
 
 // 允许的图片类型白名单
@@ -167,18 +168,16 @@ export async function processAndStoreImage(
   const storage = await getStorageFor(marker);
   const rand = randomBytes(4).toString("hex");
   const storageKey = `images/${userId}/${monthKey()}/${sha256.slice(0, 16)}-${rand}.${ext}`;
-  const thumbKey = `thumbs/${userId}/${monthKey()}/${sha256.slice(0, 16)}-${rand}.webp`;
 
-  // 原图与缩略图并行写入
-  await Promise.all([
-    storage.put(storageKey, mainBuf, { contentType: mainMime }),
-    storage.put(thumbKey, thumbBuf, { contentType: "image/webp" }),
-  ]);
+  // 缩略图不上传存储（省流量省桶空间）：只写本地两级缓存（内存 + storage/.thumbs/），每天自动清一次
+  // 缓存 key 与 thumb 路由的生成 key 一致，首次访问直接命中
+  prewriteThumb(`${marker}:${storageKey}:gen400`, thumbBuf);
+  await storage.put(storageKey, mainBuf, { contentType: mainMime });
 
   return {
     filename: sanitizeName(originalName),
     storageKey,
-    thumbKey,
+    thumbKey: "",
     storage: marker,
     mimeType: mainMime,
     size: mainBuf.length,

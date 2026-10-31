@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Loader2, Ban, ShieldCheck, Crown, UserPlus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
+import { PasswordInput } from "@/components/password-input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatBytes, shortDate } from "@/lib/utils";
@@ -388,8 +389,7 @@ export function AdminUsersClient() {
             </div>
             <div className="space-y-1.5">
               <label className="text-sm text-muted-foreground">初始密码</label>
-              <Input
-                type="password"
+              <PasswordInput
                 placeholder="至少 8 位，含大小写字母与数字"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}

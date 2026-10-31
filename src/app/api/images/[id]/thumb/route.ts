@@ -9,24 +9,20 @@ import sharp from "sharp";
 export const runtime = "nodejs";
 
 // 缩略图访问：PUBLIC / UNLISTED 免登录直链，PRIVATE 仅本人/管理员（权限校验防 IDOR）
-// 服务端走内存 LRU（命中免回源对象存储）；浏览器缓存一天，过期后 stale-while-revalidate 静默刷新
-// ?w=1600：灯箱预览档（运行时从原图生成 1600px WebP 并进 LRU，几百 KB，加载远快于原图）
-// 视频没有缩略图（thumbKey 为空）：重定向到原文件，由前端 <video preload="metadata"> 展示首帧
+// 缩略图不作为对象存进存储桶：统一由原图现场生成 400px（?w=2560 为灯箱预览档），
+// 结果进本地两级缓存（内存 LRU + storage/.thumbs/ 磁盘），命中后零回源零生成；缓存一天自动清空重建
+// 视频没有缩略图：重定向到原文件，由前端 <video preload="metadata"> 展示首帧
 export const GET = handle(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const viewer = await getCurrentUser();
   const { id } = await params;
   const img = await getImageForView(id, viewer);
-  if (!img.thumbKey || img.mimeType.startsWith("video/")) {
+  if (img.mimeType.startsWith("video/")) {
     return NextResponse.redirect(new URL(`/api/images/${id}/raw`, req.url), 307);
   }
   const preview = new URL(req.url).searchParams.get("w") === "2560";
-  // 桶同步收录的记录没有独立缩略图文件（thumbKey === storageKey 指向原图）：现场生成 400px，key 加 :gen400 区分
-  const adopted = img.thumbKey === img.storageKey;
   let buf: Buffer;
   try {
-    const cacheKey = preview
-      ? `${img.storage}:${img.storageKey}:2560`
-      : `${img.storage}:${adopted ? `${img.storageKey}:gen400` : img.thumbKey}`;
+    const cacheKey = preview ? `${img.storage}:${img.storageKey}:2560` : `${img.storage}:${img.storageKey}:gen400`;
     buf = await getThumb(cacheKey, async () => {
       const storage = await getStorageFor(img.storage);
       if (preview) {
@@ -35,11 +31,8 @@ export const GET = handle(async (req: Request, { params }: { params: Promise<{ i
         const raw = await storage.get(img.storageKey);
         return sharp(raw).resize({ width: 2560, withoutEnlargement: true }).webp({ quality: 85 }).toBuffer();
       }
-      if (adopted) {
-        const raw = await storage.get(img.storageKey);
-        return sharp(raw).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
-      }
-      return storage.get(img.thumbKey);
+      const raw = await storage.get(img.storageKey);
+      return sharp(raw).resize({ width: 400, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
     });
   } catch {
     throw new AppError("文件缺失", 404);
