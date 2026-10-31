@@ -731,11 +731,18 @@ export function AdminSettingsClient() {
             <Label htmlFor="redis-url">Redis 连接地址</Label>
             <Input
               id="redis-url"
-              placeholder="redis://default:密码@主机:6379（Docker 同栈填 redis://redis:6379）"
+              type="password"
+              autoComplete="off"
+              placeholder={
+                form.hasRedisUrl
+                  ? "已保存（密码已加密存储，输入新地址可更换）"
+                  : "redis://default:密码@主机:6379（Docker 同栈填 redis://redis:6379）"
+              }
               value={form.redisUrl}
               onChange={(e) => setForm({ ...form, redisUrl: e.target.value })}
             />
             <p className="text-xs text-muted-foreground">
+              {form.hasRedisUrl ? "已存地址不下发浏览器，留空保存即保持不变；" : ""}
               留空回退环境变量 REDIS_URL；修改后点「保存配置」生效，无需重启站点。
             </p>
           </div>

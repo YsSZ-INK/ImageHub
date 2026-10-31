@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { encryptSecret, decryptSecret } from "@/lib/secret-box";
 import type { SlotType } from "@/lib/markers";
 
 // 单个 S3 兼容存储桶连接配置（槽位列表存于 settings.r2Slots，JSON 数组）
@@ -37,9 +38,12 @@ export type SiteSettings = {
   hasSmtpPass?: boolean;
   smtpFrom: string;
   // Redis 连接地址（可选，用于限流等多实例共享场景）；留空回退环境变量 REDIS_URL，再无则降级进程内存
+  // 落库时加密存储（secret-box），下发浏览器时置空并标记 hasRedisUrl
   redisUrl: string;
   // Redis 启用开关：false 时不连 Redis（限流走进程内存），随时切换、无需重启
   redisEnabled: boolean;
+  // 只读标记：服务端已存有 Redis 地址（本体永不下发浏览器）
+  hasRedisUrl?: boolean;
 };
 
 const EMPTY_SLOT: R2SlotConfig = { accountId: "", accessKeyId: "", secretAccessKey: "", bucket: "" };
@@ -120,7 +124,7 @@ export async function getSettings(): Promise<SiteSettings> {
       smtpUser: map.get("smtpUser") ?? "",
       smtpPass: map.get("smtpPass") ?? "",
       smtpFrom: map.get("smtpFrom") ?? "",
-      redisUrl: map.get("redisUrl") ?? "",
+      redisUrl: decryptSecret(map.get("redisUrl")),
       redisEnabled: map.get("redisEnabled") === "true",
     };
     cache = { value, expiresAt: Date.now() + 60_000 };
@@ -132,11 +136,17 @@ export async function getSettings(): Promise<SiteSettings> {
 }
 
 export async function saveSettings(patch: Partial<SiteSettings>) {
-  // 剥离客户端只读标记（hasSecret / hasSmtpPass），密钥本体在调用方（路由层）合并后传入
+  // 剥离客户端只读标记（hasSecret / hasSmtpPass / hasRedisUrl），密钥本体在调用方（路由层）合并后传入
   const { r2Slots, ...rest } = patch;
   const entries = Object.entries(rest)
-    .filter(([k]) => k !== "hasSmtpPass")
+    .filter(([k]) => k !== "hasSmtpPass" && k !== "hasRedisUrl")
     .map(([k, v]) => ({ key: k, value: String(v) }));
+  // Redis 地址落库前加密（enc:v1:... 前缀标记，getSettings 读取时自动解密）
+  for (const e of entries) {
+    if (e.key === "redisUrl" && e.value && !e.value.startsWith("enc:v1:")) {
+      e.value = encryptSecret(e.value);
+    }
+  }
   if (r2Slots) {
     const slots = r2Slots.map(({ hasSecret: _omit, ...slot }) => slot);
     entries.push({ key: "r2Slots", value: JSON.stringify(slots) });
@@ -172,6 +182,8 @@ export function sanitizeSettings(s: SiteSettings): SiteSettings {
     })),
     smtpPass: "",
     hasSmtpPass: !!s.smtpPass,
+    redisUrl: "",
+    hasRedisUrl: !!s.redisUrl,
   };
 }
 

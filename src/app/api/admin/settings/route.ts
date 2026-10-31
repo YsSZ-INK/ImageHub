@@ -20,6 +20,8 @@ export const PUT = handle(async (req: Request) => {
   // 密钥只写不读：提交留空表示保持原值
   const current = await getSettings();
   if (input.smtpPass === "") input.smtpPass = current.smtpPass;
+  // Redis 地址留空表示保持已存值不变（加密落库、不下发浏览器）
+  if (input.redisUrl === "") input.redisUrl = current.redisUrl;
   input.r2Slots = input.r2Slots.map((slot) => {
     if (slot.secretAccessKey) return slot;
     // 留空：按 (accountId, accessKeyId, bucket) 匹配已存槽位继承 Secret；匹配不到则视为未配置

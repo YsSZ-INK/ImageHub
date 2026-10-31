@@ -54,6 +54,9 @@ export const PUT = handle(async (req: Request) => {
   const viewer = await requireApiUser();
   if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
   const body = saveSchema.parse(await req.json());
-  await saveSettings(body);
-  return ok({ saved: true });
+  // 地址留空表示保持已存值不变（已存地址加密落库、不下发浏览器）
+  const current = await getSettings();
+  const url = body.redisUrl || current.redisUrl;
+  await saveSettings({ redisEnabled: body.redisEnabled, redisUrl: url });
+  return ok({ saved: true, hasRedisUrl: !!url });
 });

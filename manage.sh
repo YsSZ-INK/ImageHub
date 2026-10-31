@@ -79,7 +79,37 @@ confirm() { # confirm 提示语 [默认no]
 }
 
 # ---------- 1. 更新 ----------
+# install.sh 安装的站点没有 .git，无法 git pull；update 时自动重新下载最新 manage.sh 与 docker-compose.yml
+REPO_RAW="https://raw.githubusercontent.com/YsSZ-INK/ImageHub/main"
+REPO_CDN="https://cdn.jsdelivr.net/gh/YsSZ-INK/ImageHub@main"
+
+fetch_latest() { # $1=仓库相对路径 $2=输出临时文件
+  curl -fsSL --max-time 20 "$REPO_RAW/$1" -o "$2" 2>/dev/null \
+    || curl -fsSL --max-time 20 "$REPO_CDN/$1" -o "$2" 2>/dev/null
+}
+
+# 下载到临时文件校验后 mv 覆盖：rename 保留旧 inode，覆盖正在运行的脚本自身也安全
+self_update_files() {
+  [ -d .git ] && return 0 # git clone 安装：更新走 git pull，无需下载
+  log "install.sh 安装模式：检查管理脚本与 compose 文件更新 …"
+  for f in manage.sh docker-compose.yml; do
+    if fetch_latest "$f" "$f.new" && [ -s "$f.new" ]; then
+      if { [ "$f" = "manage.sh" ] && head -n1 "$f.new" | grep -q "bash"; } ||
+        { [ "$f" = "docker-compose.yml" ] && grep -q "^services:" "$f.new"; }; then
+        mv -f "$f.new" "$f"
+        [ "$f" = "manage.sh" ] && chmod +x manage.sh
+        log "$f 已更新为最新版"
+      else
+        rm -f "$f.new"; warn "$f 下载内容异常，保留原文件"
+      fi
+    else
+      rm -f "$f.new"; warn "$f 下载失败（网络原因），保留原文件，不影响本次镜像更新"
+    fi
+  done
+}
+
 do_update() {
+  self_update_files
   log "拉取最新镜像 …"
   dc pull web
   log "重启服务 …"
