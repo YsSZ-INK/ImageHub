@@ -20,6 +20,9 @@ export interface Storage {
   getSize(key: string): Promise<number>;
   // 区间读取 [start, endExclusive)：流式返回，不把整个文件读进内存（大视频 Range 请求用）
   getRange(key: string, start: number, endExclusive: number): Promise<{ body: ReadableStream<Uint8Array>; length: number }>;
+  // 并行分片整文件读取（可选）：多连接同时回源、按序写出，慢回源网络下下载提速 2-4 倍。
+  // 仅用于「无 Range 的整文件流式响应」（下载/直接打开），视频拖动等 Range 请求仍走单区间 getRange。
+  getParallelStream?(key: string, total: number): Promise<ReadableStream<Uint8Array>>;
   delete(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
 }

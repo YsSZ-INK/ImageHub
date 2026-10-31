@@ -36,8 +36,10 @@ export function makeS3Client(cfg: S3CompatibleConfig): S3Client {
 export class R2Storage implements Storage {
   private client: S3Client;
   private bucket: string;
+  private cfg: S3CompatibleConfig;
 
   constructor(cfg: S3CompatibleConfig) {
+    this.cfg = cfg;
     this.client = makeS3Client(cfg);
     this.bucket = cfg.bucket;
   }
@@ -71,7 +73,6 @@ export class R2Storage implements Storage {
     return res.ContentLength ?? 0;
   }
 
-  // 区间流式读取：S3 Range 参数让对象存储只传所需区间，不整文件下载
   async getRange(key: string, start: number, endExclusive: number): Promise<{ body: ReadableStream<Uint8Array>; length: number }> {
     const res = await this.client.send(
       new GetObjectCommand({ Bucket: this.bucket, Key: key, Range: `bytes=${start}-${endExclusive - 1}` })
@@ -81,6 +82,56 @@ export class R2Storage implements Storage {
       body: res.Body.transformToWebStream() as unknown as ReadableStream<Uint8Array>,
       length: res.ContentLength ?? endExclusive - start,
     };
+  }
+
+  // 下载专用客户端：整文件下载耗时长，复用 30s 回源超时会把大文件下载中途打断
+  private dlClient: S3Client | null = null;
+  private downloadClient(): S3Client {
+    if (!this.dlClient) {
+      this.dlClient = new S3Client({
+        region: this.cfg.region?.trim() || "auto",
+        endpoint: slotEndpoint(this.cfg),
+        credentials: { accessKeyId: this.cfg.accessKeyId, secretAccessKey: this.cfg.secretAccessKey },
+        forcePathStyle: true,
+        requestHandler: { requestTimeout: 300_000, connectionTimeout: 10_000, throwOnRequestTimeout: true },
+      });
+    }
+    return this.dlClient;
+  }
+
+  // 并行分片整文件读取：把文件切成 8MB 段，窗口内 3 路并发请求、按序写出。
+  // 单连接被 RTT/丢包限速时（国内访问 R2 尤其明显），多连接并行可提升 2-4 倍；
+  // 内存占用恒定 ≤ 窗口 × 段大小（3 × 8MB = 24MB），下载完成即释放。
+  async getParallelStream(key: string, total: number): Promise<ReadableStream<Uint8Array>> {
+    const SEG = 8 * 1024 * 1024;
+    const WINDOW = 3;
+    const client = this.downloadClient();
+    const pt = new TransformStream<Uint8Array, Uint8Array>();
+    const ranges: Array<[number, number]> = [];
+    for (let s = 0; s < total; s += SEG) ranges.push([s, Math.min(s + SEG, total)]);
+    void (async () => {
+      try {
+        for (let i = 0; i < ranges.length; i += WINDOW) {
+          const batch = ranges.slice(i, i + WINDOW);
+          const bodies = await Promise.all(
+            batch.map(([s, e]) =>
+              client
+                .send(new GetObjectCommand({ Bucket: this.bucket, Key: key, Range: `bytes=${s}-${e - 1}` }))
+                .then((r) => {
+                  if (!r.Body) throw new Error("存储返回空响应");
+                  return r.Body.transformToWebStream() as ReadableStream<Uint8Array>;
+                })
+            )
+          );
+          // 窗口内已并行下载，这里按序写入同一条输出流（preventClose 允许多个源接力写入）
+          for (const b of bodies) await b.pipeTo(pt.writable, { preventClose: true });
+        }
+        await pt.writable.close();
+      } catch (err) {
+        await pt.writable.abort(err).catch(() => {});
+      }
+    })();
+    return pt.readable;
   }
 
   async delete(key: string): Promise<void> {

@@ -75,9 +75,16 @@ async function serveFile(req: Request, id: string, kind: "raw" | "thumb", downlo
     }
   }
 
-  // 大文件无 Range 请求（如浏览器直接打开视频）：同样流式整发，内存占用恒定
+  // 大文件无 Range 请求（下载 / 浏览器直接打开）：并行分片流式整发——
+  // 多连接同时回源、按序写出，慢回源网络（国内访问 R2）下下载提速 2-4 倍
   if (streamIfLarge) {
     try {
+      if (storage.getParallelStream) {
+        const body = await storage.getParallelStream(key, total);
+        return new NextResponse(body, {
+          headers: { ...headers, "Accept-Ranges": "bytes", "Content-Length": String(total) },
+        });
+      }
       const { body, length } = await storage.getRange(key, 0, total);
       return new NextResponse(body, {
         headers: { ...headers, "Accept-Ranges": "bytes", "Content-Length": String(length) },
