@@ -11,7 +11,8 @@
 set -euo pipefail
 
 REPO_RAW="https://raw.githubusercontent.com/YsSZ-INK/ImageHub/main"
-INSTALL_DIR="${IMAGEHUB_DIR:-$HOME/ImageHub}"
+# 安装目录保持为空，交互模式下由下方 ask 询问用户（非交互/预设 IMAGEHUB_DIR 时取默认值）
+INSTALL_DIR=""
 DEFAULT_PORT="3000"
 
 log()  { printf '\033[1;32m[ImageHub]\033[0m %s\n' "$*"; }

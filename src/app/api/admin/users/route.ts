@@ -21,5 +21,5 @@ export const POST = handle(async (req: Request) => {
   if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
   const input = adminUserCreateSchema.parse(await req.json());
   const user = await adminCreateUser(input);
-  return ok({ user: publicUser(user) }, 201);
+  return ok({ user: await publicUser(user) }, 201);
 });

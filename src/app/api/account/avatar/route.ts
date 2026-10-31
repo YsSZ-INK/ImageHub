@@ -19,5 +19,5 @@ export const POST = handle(async (req: Request) => {
 
   const buf = Buffer.from(await file.arrayBuffer());
   const updated = await updateAvatar(user, buf);
-  return ok({ user: publicUser(updated) });
+  return ok({ user: await publicUser(updated) });
 });

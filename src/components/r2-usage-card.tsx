@@ -67,8 +67,7 @@ export function R2UsageCard({
       </div>
       <Progress value={pct} />
       <p className="mt-2 text-xs text-muted-foreground">
-        {formatBytes(showUsed)} · {showCount} 个文件{live ? "（桶内实时）" : ""}
-        ，免费额度 10 GB 的 {pct}%
+        已用 {formatBytes(showUsed)} / 上限 10 GB · {showCount} 个文件{live ? "（桶内实时）" : ""}（{pct}%）
       </p>
     </div>
   );

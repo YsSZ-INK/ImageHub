@@ -215,7 +215,7 @@ export function SettingsClient({ user }: Props) {
         {/* 配额 */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">存储配额</CardTitle>
+            <CardTitle className="text-base">存储配额（仅本地文件占用）</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             <Progress value={pct} />

@@ -11,5 +11,5 @@ export const PATCH = handle(async (req: Request) => {
   const user = await requireApiUser();
   const input = profileSchema.parse(await req.json());
   const updated = await updateProfile(user, input);
-  return ok({ user: publicUser(updated) });
+  return ok({ user: await publicUser(updated) });
 });

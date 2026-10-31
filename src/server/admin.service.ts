@@ -17,6 +17,13 @@ export async function adminListUsers(search?: string) {
     take: 100,
     include: { _count: { select: { images: { where: { deletedAt: null } } } } },
   });
+  // 已用空间 = 本地文件占用（配额口径：R2 中的文件不占配额，见 storage-stats.ts）
+  const locals = await prisma.image.groupBy({
+    by: ["userId"],
+    _sum: { size: true },
+    where: { storage: "local", userId: { in: users.map((u) => u.id) } },
+  });
+  const localMap = new Map(locals.map((g) => [g.userId, g._sum.size ?? 0n]));
   return users.map((u) => ({
     id: u.id,
     email: u.email,
@@ -26,7 +33,7 @@ export async function adminListUsers(search?: string) {
     avatarUrl: u.avatarUrl,
     emailVerified: u.emailVerified,
     storageQuota: u.storageQuota.toString(),
-    storageUsed: u.storageUsed.toString(),
+    storageUsed: (localMap.get(u.id) ?? 0n).toString(),
     imageCount: u._count.images,
     createdAt: u.createdAt,
   }));
@@ -131,13 +138,10 @@ export async function adminTakedownImage(id: string) {
 export async function adminPurgeImage(id: string) {
   const img = await prisma.image.findUnique({ where: { id } });
   if (!img) throw new AppError("图片不存在", 404);
-  // 按记录的实际存放位置删除（local / r2）
+  // 按记录的实际存放位置删除（local / r2:<n>）；配额为实时聚合，无需扣减
   const storage = await getStorageFor(img.storage);
   await prisma.image.delete({ where: { id } });
   await Promise.allSettled([storage.delete(img.storageKey), storage.delete(img.thumbKey)]);
-  await prisma.user
-    .update({ where: { id: img.userId }, data: { storageUsed: { decrement: BigInt(img.size) } } })
-    .catch(() => {});
 }
 
 // 统计面板

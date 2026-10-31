@@ -5,6 +5,7 @@ import { AppError } from "@/lib/api";
 import { getMailer } from "@/lib/mailer";
 import { getStorageFor, getLocalStorage } from "@/lib/storage";
 import { processAndStoreAvatar } from "@/lib/image";
+import { localUsageOf } from "@/server/storage-stats";
 import type { User } from "@prisma/client";
 import type { z } from "zod";
 import type {
@@ -153,7 +154,7 @@ export async function deleteAccount(user: User) {
   await local.delete(`avatars/${user.id}.webp`).catch(() => {});
 }
 
-export function publicUser(u: User) {
+export async function publicUser(u: User) {
   return {
     id: u.id,
     email: u.email,
@@ -163,7 +164,8 @@ export function publicUser(u: User) {
     status: u.status,
     emailVerified: u.emailVerified,
     storageQuota: u.storageQuota.toString(),
-    storageUsed: u.storageUsed.toString(),
+    // 已用空间 = 本地文件占用（配额口径：R2 中的文件不占配额，见 storage-stats.ts）
+    storageUsed: (await localUsageOf(u.id)).toString(),
     createdAt: u.createdAt,
   };
 }

@@ -4,8 +4,7 @@ import { r2SlotLabel } from "@/lib/storage";
 import { prisma } from "@/lib/db";
 import { ConsoleTopBar, type NavGroup } from "@/components/console-topbar";
 import { SideNav } from "@/components/side-nav";
-import { QuotaBar } from "@/components/quota-bar";
-import { R2UsageCard } from "@/components/r2-usage-card";
+import { StorageCards, type StorageCardsSnapshot } from "@/components/storage-cards";
 import { InkBackdrop } from "@/components/ink-theme";
 
 // icon 为字符串名，由 SideNav 客户端组件映射（图标组件不能跨 RSC 边界传递）
@@ -47,9 +46,25 @@ export async function ConsoleShell({ children }: { children: React.ReactNode }) 
   const r2Slots = settings.r2Slots
     .map((cfg, i) => ({ cfg, i }))
     .filter(({ cfg }) => cfg.accountId && cfg.accessKeyId && cfg.secretAccessKey && cfg.bucket);
-  const r2Aggs = await Promise.all(
-    r2Slots.map(({ i }) => prisma.image.aggregate({ _sum: { size: true }, _count: true, where: { storage: `r2:${i}` } }))
-  );
+  // 本地磁盘上的图片文件占用（迁移到 R2 后会减少；头像不含在内）
+  const localAgg = await prisma.image.aggregate({ _sum: { size: true }, _count: true, where: { storage: "local" } });
+  const r2Aggs = r2Slots.length
+    ? await Promise.all(
+        r2Slots.map(({ i }) => prisma.image.aggregate({ _sum: { size: true }, _count: true, where: { storage: `r2:${i}` } }))
+      )
+    : [];
+  // 服务端渲染的初始快照；之后由 StorageCards 每 10 秒轮询局部刷新
+  const initialSnap: StorageCardsSnapshot = {
+    quota: Number(user.storageQuota),
+    localUsed: Number(localAgg._sum.size ?? 0),
+    localCount: localAgg._count,
+    slots: r2Slots.map(({ i }, n) => ({
+      marker: `r2:${i}`,
+      label: r2SlotLabel(i),
+      used: Number(r2Aggs[n]._sum.size ?? 0),
+      count: r2Aggs[n]._count,
+    })),
+  };
 
   const navGroups = user.role === "ADMIN" ? [...MY_GROUPS, ADMIN_GROUP] : MY_GROUPS;
   const flatItems = navGroups.flatMap((g) => g.items);
@@ -72,17 +87,8 @@ export async function ConsoleShell({ children }: { children: React.ReactNode }) 
             ))}
           </div>
           <div className="border-t border-foreground/10 p-3">
-            <QuotaBar used={Number(user.storageUsed)} quota={Number(user.storageQuota)} />
-            {r2Slots.map(({ i }, n) => (
-              <R2UsageCard
-                key={i}
-                marker={`r2:${i}`}
-                label={r2SlotLabel(i)}
-                used={Number(r2Aggs[n]._sum.size ?? 0)}
-                count={r2Aggs[n]._count}
-                isAdmin={user.role === "ADMIN"}
-              />
-            ))}
+            {/* 存储卡片：初始服务端渲染，之后每 10 秒轮询局部刷新（迁移/上传后占用自动更新） */}
+            <StorageCards initial={initialSnap} isAdmin={user.role === "ADMIN"} />
           </div>
         </aside>
         <main className="min-w-0 flex-1 p-4 md:p-6">

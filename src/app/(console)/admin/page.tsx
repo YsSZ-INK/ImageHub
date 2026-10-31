@@ -37,17 +37,21 @@ export default async function AdminPage() {
           <CardTitle className="text-sm font-medium text-muted-foreground">近 7 天上传趋势</CardTitle>
         </CardHeader>
         <CardContent>
+          {/* 柱高用像素而非百分比：父列高度不定时 % 会解析为 0 导致柱子不可见 */}
           <div className="flex h-40 items-end gap-3">
-            {stats.trend.map((t) => (
-              <div key={t.date} className="flex flex-1 flex-col items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">{t.count}</span>
-                <div
-                  className="w-full max-w-12 rounded-t bg-primary/80"
-                  style={{ height: `${Math.max((t.count / maxTrend) * 100, 2)}%` }}
-                />
-                <span className="text-xs text-muted-foreground">{t.date}</span>
-              </div>
-            ))}
+            {stats.trend.map((t) => {
+              const barH = Math.max(Math.round((t.count / maxTrend) * 108), 4);
+              return (
+                <div key={t.date} className="flex flex-1 flex-col items-center justify-end gap-1.5 self-stretch">
+                  <span className="text-xs text-muted-foreground">{t.count}</span>
+                  <div
+                    className={`w-full max-w-12 rounded-t ${t.count > 0 ? "bg-primary/80" : "bg-muted"}`}
+                    style={{ height: `${barH}px` }}
+                  />
+                  <span className="text-xs text-muted-foreground">{t.date}</span>
+                </div>
+              );
+            })}
           </div>
         </CardContent>
       </Card>

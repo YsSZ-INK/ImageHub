@@ -20,5 +20,5 @@ export const POST = handle(async (req: Request) => {
   const body = await req.json();
   const input = registerSchema.parse(body);
   const user = await registerUser(input);
-  return ok({ user: publicUser(user) }, 201);
+  return ok({ user: await publicUser(user) }, 201);
 });

@@ -14,7 +14,7 @@ export const PATCH = handle(async (req: Request, { params }: { params: Promise<{
   const { id } = await params;
   const input = adminUserUpdateSchema.parse(await req.json());
   const updated = await adminUpdateUser(viewer.id, id, input);
-  return ok({ user: publicUser(updated) });
+  return ok({ user: await publicUser(updated) });
 });
 
 // 删除用户：永久删除该用户全部数据（图片/相册/动态/存储对象），不可恢复

@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
 import { getStorageFor } from "@/lib/storage";
 import { processAndStoreImage, processAndStoreVideo, detectVideoMime } from "@/lib/image";
+import { localUsageOf } from "@/server/storage-stats";
 import type { User, Image } from "@prisma/client";
 import type { z } from "zod";
 import type {
@@ -143,8 +144,8 @@ async function uploadOne(
     return { ...toDTO(dup), deduped: true };
   }
 
-  // 配额校验
-  const used = Number(user.storageUsed);
+  // 配额校验（口径：仅统计本地磁盘占用，见 storage-stats.ts）
+  const used = Number(await localUsageOf(user.id));
   const quota = Number(user.storageQuota);
   if (used + f.buf.length > quota) {
     throw new AppError("存储配额不足，请清理空间或联系管理员", 413);
@@ -154,31 +155,25 @@ async function uploadOne(
   const processed = detectVideoMime(f.buf)
     ? await processAndStoreVideo(f.buf, user.id, f.name)
     : await processAndStoreImage(f.buf, user.id, f.name);
-  const [img] = await prisma.$transaction([
-    prisma.image.create({
-      data: {
-        userId: user.id,
-        filename: processed.filename,
-        storageKey: processed.storageKey,
-        thumbKey: processed.thumbKey,
-        storage: processed.storage,
-        mimeType: processed.mimeType,
-        size: processed.size,
-        width: processed.width,
-        height: processed.height,
-        sha256: processed.sha256,
-        blurhash: processed.blurhash,
-        albumId,
-        // 管理员上传免审核直接发布；普通用户上传进入待审核队列
-        status: user.role === "ADMIN" ? "PUBLISHED" : "PENDING",
-      },
-      include: { user: { select: { name: true } } },
-    }),
-    prisma.user.update({
-      where: { id: user.id },
-      data: { storageUsed: { increment: BigInt(processed.size) } },
-    }),
-  ]);
+  const img = await prisma.image.create({
+    data: {
+      userId: user.id,
+      filename: processed.filename,
+      storageKey: processed.storageKey,
+      thumbKey: processed.thumbKey,
+      storage: processed.storage,
+      mimeType: processed.mimeType,
+      size: processed.size,
+      width: processed.width,
+      height: processed.height,
+      sha256: processed.sha256,
+      blurhash: processed.blurhash,
+      albumId,
+      // 管理员上传免审核直接发布；普通用户上传进入待审核队列
+      status: user.role === "ADMIN" ? "PUBLISHED" : "PENDING",
+    },
+    include: { user: { select: { name: true } } },
+  });
   return toDTO(img);
 }
 
@@ -320,17 +315,13 @@ export async function restoreImage(id: string, viewer: Viewer) {
   return prisma.image.update({ where: { id }, data: { deletedAt: null } });
 }
 
-// 彻底删除：同时删除存储对象（按记录的实际存放位置）、扣减配额
+// 彻底删除：同时删除存储对象（按记录的实际存放位置）；配额为实时聚合，无需扣减
 export async function purgeImage(id: string, viewer: Viewer) {
   const img = await assertOwnership(id, viewer);
   const storage = await getStorageFor(img.storage);
   await clearAlbumCovers([id]);
   await prisma.image.delete({ where: { id } });
   await Promise.allSettled([storage.delete(img.storageKey), storage.delete(img.thumbKey)]);
-  await prisma.user.update({
-    where: { id: img.userId },
-    data: { storageUsed: { decrement: BigInt(img.size) } },
-  });
 }
 
 // 清理超过 30 天的回收站（懒执行）

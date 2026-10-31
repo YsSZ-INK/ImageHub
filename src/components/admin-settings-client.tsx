@@ -69,6 +69,7 @@ export function AdminSettingsClient() {
               if (next.failed > 0)
                 toast.warning(`迁移结束：成功 ${next.done - next.failed}/${next.total}，失败 ${next.failed}（失败图片保留原位置，可重新发起重试）`);
               else toast.success(`迁移完成：共 ${next.total} 个文件`);
+              // 侧栏存储卡片由 10 秒轮询局部刷新，无需整页 reload
             }
             return next;
           });
@@ -123,8 +124,11 @@ export function AdminSettingsClient() {
         body: JSON.stringify({ ...form, maxUploadMB: maxMb, smtpPort: port }),
       });
       const json = await res.json();
-      if (json.ok) toast.success("设置已保存");
-      else toast.error(json.error);
+      if (json.ok) {
+        toast.success("设置已保存，页面即将刷新");
+        // 刷新以同步侧栏（存储驱动 / R2 桶卡片 / 站点名等）
+        setTimeout(() => window.location.reload(), 800);
+      } else toast.error(json.error);
     } finally {
       setSaving(false);
     }
