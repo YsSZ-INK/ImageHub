@@ -1,4 +1,5 @@
 import { requireAdmin } from "@/lib/session";
+import { isAdminRole } from "@/lib/roles";
 import { adminStats } from "@/server/admin.service";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatBytes, formatDate } from "@/lib/utils";
@@ -116,8 +117,10 @@ export default async function AdminPage() {
                 <div key={u.email} className="flex items-center justify-between gap-2 text-sm">
                   <span className="min-w-0 truncate">
                     {u.name}
-                    {u.role === "ADMIN" && (
-                      <span className="ml-1.5 rounded bg-primary/10 px-1 py-0.5 text-[0.625rem] text-primary">管理员</span>
+                    {isAdminRole(u.role) && (
+                      <span className="ml-1.5 rounded bg-primary/10 px-1 py-0.5 text-[0.625rem] text-primary">
+                        {u.role === "SUPERADMIN" ? "超级管理员" : "管理员"}
+                      </span>
                     )}
                     <span className="ml-1.5 text-xs text-muted-foreground">{u.email}</span>
                   </span>

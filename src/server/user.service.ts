@@ -32,8 +32,8 @@ export async function registerUser(input: z.infer<typeof registerSchema>): Promi
   if (existsName) throw new AppError("用户名已被占用", 409);
 
   const passwordHash = await bcrypt.hash(input.password, 12);
-  // 首个注册用户自动成为管理员（生产环境无 seed 时用于引导）
-  const role = (await prisma.user.count()) === 0 ? "ADMIN" : "USER";
+  // 首个注册用户自动成为超级管理员（站长，生产环境无 seed 时用于引导）；后续管理员由其在用户管理中设置
+  const role = (await prisma.user.count()) === 0 ? "SUPERADMIN" : "USER";
   const user = await prisma.user.create({
     data: { email, name: input.name, passwordHash, role },
   });

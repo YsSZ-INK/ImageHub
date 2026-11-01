@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
+import { isAdminRole } from "@/lib/roles";
 import { Images, LayoutDashboard, Shield, LogOut, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -67,7 +68,7 @@ export function SiteHeader({ siteName, user }: Props) {
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => router.push("/settings")}>个人中心</DropdownMenuItem>
               <DropdownMenuItem onClick={() => router.push("/images")}>上传图片</DropdownMenuItem>
-              {user.role === "ADMIN" && (
+              {isAdminRole(user.role) && (
                 <DropdownMenuItem onClick={() => router.push("/admin")}>管理后台</DropdownMenuItem>
               )}
               <DropdownMenuSeparator />

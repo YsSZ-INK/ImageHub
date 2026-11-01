@@ -1,5 +1,5 @@
-import { handle, assertSameOrigin, ok, AppError } from "@/lib/api";
-import { requireApiUser } from "@/lib/session";
+import { handle, assertSameOrigin, ok } from "@/lib/api";
+import { requireApiSuper } from "@/lib/session";
 import { startMigration, migrationStatus } from "@/server/migration.service";
 import { z } from "zod";
 
@@ -17,8 +17,7 @@ const schema = z
 // 发起存量迁移（后台执行，立即返回）；指定 ids 时仅迁移勾选的图片
 export const POST = handle(async (req: Request) => {
   assertSameOrigin(req);
-  const viewer = await requireApiUser();
-  if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+  await requireApiSuper();
   const { from, to, ids } = schema.parse(await req.json());
   await startMigration(from, to, ids);
   return ok({ message: "迁移已开始" });
@@ -26,7 +25,6 @@ export const POST = handle(async (req: Request) => {
 
 // 查询迁移进度（前端 2s 轮询）
 export const GET = handle(async () => {
-  const viewer = await requireApiUser();
-  if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+  await requireApiSuper();
   return ok(migrationStatus());
 });

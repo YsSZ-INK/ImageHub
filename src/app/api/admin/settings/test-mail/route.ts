@@ -1,5 +1,5 @@
-import { handle, assertSameOrigin, ok, fail, AppError } from "@/lib/api";
-import { requireApiUser } from "@/lib/session";
+import { handle, assertSameOrigin, ok, fail } from "@/lib/api";
+import { requireApiSuper } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 import { getMailer } from "@/lib/mailer";
 
@@ -8,8 +8,7 @@ export const runtime = "nodejs";
 // 发送测试邮件：收件人为当前管理员的邮箱；需先保存 SMTP 配置
 export const POST = handle(async (req: Request) => {
   assertSameOrigin(req);
-  const viewer = await requireApiUser();
-  if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+  const viewer = await requireApiSuper();
 
   const settings = await getSettings();
   if (!settings.smtpHost) {

@@ -1,5 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
+import { isAdminRole, isSuper } from "@/lib/roles";
 import { slotConfigured, slotDisplayName } from "@/lib/markers";
 import { prisma } from "@/lib/db";
 import { ConsoleTopBar, type NavGroup } from "@/components/console-topbar";
@@ -68,7 +69,11 @@ export async function ConsoleShell({ children }: { children: React.ReactNode }) 
     })),
   };
 
-  const navGroups = user.role === "ADMIN" ? [...MY_GROUPS, ADMIN_GROUP] : MY_GROUPS;
+  // 「系统」分组：两级管理员可见；用户管理/存储迁移/站点设置仅超级管理员可见
+  const adminGroup: NavGroup = isSuper(user.role)
+    ? ADMIN_GROUP
+    : { ...ADMIN_GROUP, items: ADMIN_GROUP.items.filter((i) => i.href === "/admin" || i.href === "/admin/images") };
+  const navGroups = isAdminRole(user.role) ? [...MY_GROUPS, adminGroup] : MY_GROUPS;
   const flatItems = navGroups.flatMap((g) => g.items);
 
   return (
@@ -90,7 +95,7 @@ export async function ConsoleShell({ children }: { children: React.ReactNode }) 
           </div>
           <div className="border-t border-foreground/10 p-3">
             {/* 存储卡片：初始服务端渲染，之后每 10 秒轮询局部刷新（迁移/上传后占用自动更新） */}
-            <StorageCards initial={initialSnap} isAdmin={user.role === "ADMIN"} />
+            <StorageCards initial={initialSnap} isAdmin={isSuper(user.role)} />
           </div>
         </aside>
         <main className="min-w-0 flex-1 p-4 md:p-6">

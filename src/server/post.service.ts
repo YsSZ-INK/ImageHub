@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
+import { isAdminRole } from "@/lib/roles";
 import { logActivity } from "@/server/audit.service";
 import { toDTO, clearAlbumCovers, invalidateImageView, type Viewer } from "@/server/image.service";
 import type { ImageDTO } from "@/server/image.service";
@@ -58,7 +59,7 @@ export async function listPosts(
     createdAt: p.createdAt,
     author: { id: p.user.id, name: p.user.name, avatarUrl: p.user.avatarUrl },
     images: p.images.map(toDTO),
-    canDelete: p.user.id === viewer.id || viewer.role === "ADMIN",
+    canDelete: p.user.id === viewer.id || isAdminRole(viewer.role),
     commentCount: p._count.comments,
   }));
   return { items, nextCursor: hasMore ? rows[take - 1].id : null };
@@ -137,7 +138,7 @@ export async function deletePost(postId: string, viewer: Viewer) {
     include: { user: { select: { name: true } } },
   });
   if (!post) throw new AppError("动态不存在", 404);
-  if (post.userId !== viewer.id && viewer.role !== "ADMIN") throw new AppError("无权操作该动态", 403);
+  if (post.userId !== viewer.id && !isAdminRole(viewer.role)) throw new AppError("无权操作该动态", 403);
   // images.postId 为 SetNull：先找出本动态的图片再删除动态
   const imgs = await prisma.image.findMany({
     where: { postId, deletedAt: null },
@@ -194,7 +195,7 @@ export async function listComments(postId: string, viewer: Viewer): Promise<Comm
     content: c.content,
     createdAt: c.createdAt.toISOString(),
     user: { id: c.user.id, name: c.user.name, avatarUrl: c.user.avatarUrl },
-    canDelete: c.userId === viewer.id || viewer.role === "ADMIN",
+    canDelete: c.userId === viewer.id || isAdminRole(viewer.role),
     parentId: c.parentId,
     replyTo: c.replyToUser ? { id: c.replyToUser.id, name: c.replyToUser.name } : null,
   }));
@@ -254,7 +255,7 @@ export async function addComment(
 export async function deleteComment(commentId: string, viewer: Viewer) {
   const c = await prisma.postComment.findUnique({ where: { id: commentId }, include: { user: { select: { name: true } } } });
   if (!c) throw new AppError("评论不存在", 404);
-  if (c.userId !== viewer.id && viewer.role !== "ADMIN") throw new AppError("只能删除自己的评论", 403);
+  if (c.userId !== viewer.id && !isAdminRole(viewer.role)) throw new AppError("只能删除自己的评论", 403);
   await prisma.postComment.delete({ where: { id: commentId } });
   await logActivity(viewer.id, "comment_delete", c.userId === viewer.id ? "删除了自己的评论" : `删除了 ${c.user.name} 的评论`);
 }

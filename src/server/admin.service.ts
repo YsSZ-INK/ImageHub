@@ -13,7 +13,6 @@ import type { adminUserCreateSchema } from "@/lib/validation";
 // ============ 管理后台 ============
 
 export async function adminListUsers(search?: string) {
-  const superId = await superAdminIdOf();
   const users = await prisma.user.findMany({
     where: search
       ? { OR: [{ email: { contains: search } }, { name: { contains: search } }] }
@@ -41,21 +40,13 @@ export async function adminListUsers(search?: string) {
     storageUsed: (localMap.get(u.id) ?? 0n).toString(),
     imageCount: u._count.images,
     createdAt: u.createdAt,
-    isSuperAdmin: u.id === superId,
+    isSuperAdmin: u.role === "SUPERADMIN",
   }));
 }
 
 // ============ 超级管理员 ============
-// 超级管理员 = 站内最早的 ADMIN 账号（站长）。其他管理员可管理普通用户，
-// 但不能重置其密码，也不能封禁/降级（否则可先降级再改密，绕过密码保护）。
-export async function superAdminIdOf(): Promise<string | null> {
-  const first = await prisma.user.findFirst({
-    where: { role: "ADMIN" },
-    orderBy: { createdAt: "asc" },
-    select: { id: true },
-  });
-  return first?.id ?? null;
-}
+// 超级管理员 = 站内唯一的 SUPERADMIN（站长，由数据迁移产生）。
+// 其他管理员可管理普通用户，但不能重置其密码，也不能封禁/降级（否则可先降级再改密，绕过密码保护）。
 
 // 管理员创建用户（邮箱/用户名查重 + 强密码哈希，角色与配额由管理员指定）
 export async function adminCreateUser(input: z.infer<typeof adminUserCreateSchema>) {
@@ -83,6 +74,7 @@ export async function adminDeleteUser(adminId: string, id: string) {
   if (id === adminId) throw new AppError("不能删除自己的账号，请使用「个人中心 → 账号注销」", 400);
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) throw new AppError("用户不存在", 404);
+  if (user.role === "SUPERADMIN") throw new AppError("超级管理员不能被删除", 403);
   // 保护：管理员需先降级再删除，避免误删后台管理账号
   if (user.role === "ADMIN") throw new AppError("管理员不能直接删除，请先降级为普通用户", 400);
   await deleteAccount(user);
@@ -99,14 +91,14 @@ export async function adminUpdateUser(
   // 保护：不能封禁自己，避免把自己锁在后台外面
   if (patch.status === "BANNED" && id === adminId) throw new AppError("不能封禁自己", 400);
   // 保护：超级管理员不可被重置密码/封禁/降级（先降级再改密可绕过密码保护，一并封死）
-  if (id === (await superAdminIdOf())) {
+  if (user.role === "SUPERADMIN") {
     if (patch.password) throw new AppError("超级管理员的密码不能由其他管理员重置", 403);
     if (patch.status === "BANNED") throw new AppError("不能封禁超级管理员", 403);
-    if (patch.role === "USER") throw new AppError("不能降级超级管理员", 403);
+    if (patch.role) throw new AppError("不能修改超级管理员的角色", 403);
   }
-  // 保护：最后一个管理员不能降级，避免后台失去管理能力
+  // 保护：最后一个管理员不能降级，避免后台失去管理能力（管理员口径含超级管理员）
   if (patch.role === "USER" && user.role === "ADMIN") {
-    const adminCount = await prisma.user.count({ where: { role: "ADMIN" } });
+    const adminCount = await prisma.user.count({ where: { role: { in: ["ADMIN", "SUPERADMIN"] } } });
     if (adminCount <= 1) throw new AppError("不能降级最后一个管理员", 400);
   }
   const updated = await prisma.user.update({

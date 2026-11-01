@@ -1,5 +1,5 @@
-import { handle, assertSameOrigin, ok, AppError } from "@/lib/api";
-import { requireApiUser } from "@/lib/session";
+import { handle, assertSameOrigin, ok } from "@/lib/api";
+import { requireApiSuper } from "@/lib/session";
 import { redisStatus, testRedisUrl, getRedis } from "@/lib/redis";
 import { getSettings, saveSettings } from "@/lib/settings";
 import { logActivity } from "@/server/audit.service";
@@ -9,8 +9,7 @@ export const runtime = "nodejs";
 
 // 当前 Redis 连接状态（含站点设置里的启用开关状态）
 export const GET = handle(async () => {
-  const viewer = await requireApiUser();
-  if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+  await requireApiSuper();
   const settings = await getSettings();
   return ok({ ...redisStatus(), enabled: settings.redisEnabled });
 });
@@ -20,8 +19,7 @@ const bodySchema = z.object({ url: z.string().max(255).trim().optional() });
 // 测试连接：带 url 测表单值（保存前验证）；不带则对当前生效配置 PING 一次
 export const POST = handle(async (req: Request) => {
   assertSameOrigin(req);
-  const viewer = await requireApiUser();
-  if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+  await requireApiSuper();
   const { url } = bodySchema.parse(await req.json().catch(() => ({})));
   if (url !== undefined && url !== "") {
     const r = await testRedisUrl(url);
@@ -52,8 +50,7 @@ const saveSchema = z.object({
 
 export const PUT = handle(async (req: Request) => {
   assertSameOrigin(req);
-  const viewer = await requireApiUser();
-  if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+  const viewer = await requireApiSuper();
   const body = saveSchema.parse(await req.json());
   // 地址留空表示保持已存值不变（已存地址加密落库、不下发浏览器）
   const current = await getSettings();

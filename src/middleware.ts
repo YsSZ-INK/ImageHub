@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfig } from "@/lib/auth.config";
+import { isAdminRole, isSuper } from "@/lib/roles";
 
 // 访问控制中间件（边缘运行时）：
 // - 未登录只能访问 / 与认证相关页面
@@ -48,8 +49,13 @@ export default auth((req) => {
   // 安全员（渗透测试修复）：/api/* 的路径是 /api/admin/...，
   // 原 startsWith("/admin") 永远不匹配 API 路由，管理接口只靠路由内守卫兜底——
   // 这里补一道全局预检，防止未来某个 /api/admin 路由漏写守卫。
-  if (logged && path.startsWith("/api/admin") && role !== "ADMIN") {
-    return NextResponse.json({ ok: false, error: "无权限" }, { status: 403 });
+  // 权限分级：/api/admin/images* 两级管理员可用（图片审核队列），
+  // 其余管理接口（用户/设置/存储/备份/日志）仅超级管理员。
+  if (logged && path.startsWith("/api/admin")) {
+    const ok = path.startsWith("/api/admin/images") ? isAdminRole(role) : isSuper(role);
+    if (!ok) {
+      return NextResponse.json({ ok: false, error: "无权限" }, { status: 403 });
+    }
   }
 
   // 已登录访问首页 → 画廊
@@ -75,14 +81,9 @@ export default auth((req) => {
     return NextResponse.redirect(url);
   }
 
-  // 管理后台仅 ADMIN
-  if (logged && path.startsWith("/admin")) {
-    if (role !== "ADMIN") {
-      if (path.startsWith("/api/admin")) {
-        return NextResponse.json({ ok: false, error: "无权限" }, { status: 403 });
-      }
-      return NextResponse.redirect(new URL("/gallery", nextUrl));
-    }
+  // 管理后台页面：两级管理员均可进入（超管专属页由页面守卫拦截）
+  if (logged && path.startsWith("/admin") && !isAdminRole(role)) {
+    return NextResponse.redirect(new URL("/gallery", nextUrl));
   }
 
   return nextWithInkBg(req);

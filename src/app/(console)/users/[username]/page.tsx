@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/session";
+import { isSuper } from "@/lib/roles";
 import { hasAccessTo } from "@/server/access.service";
 import { listImages } from "@/server/image.service";
 import { GalleryView } from "@/components/gallery-view";
@@ -20,7 +21,7 @@ export default async function UserImagesPage({ params }: { params: Promise<{ use
   if (!target || target.status !== "ACTIVE") notFound();
   if (target.id === viewer.id) redirect("/images");
 
-  const granted = viewer.role === "ADMIN" || (await hasAccessTo(viewer.id, target.id));
+  const granted = isSuper(viewer.role) || (await hasAccessTo(viewer.id, target.id));
   if (!granted) {
     return (
       <div className="space-y-4">

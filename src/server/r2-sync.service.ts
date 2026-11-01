@@ -89,7 +89,11 @@ export async function syncR2Once(): Promise<SyncStatus> {
   state.slots = [];
   try {
     const settings = await getSettings();
-    const owner = await prisma.user.findFirst({ where: { role: "ADMIN" }, select: { id: true } });
+    const owner = await prisma.user.findFirst({
+      where: { role: { in: ["SUPERADMIN", "ADMIN"] } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
     for (let i = 0; i < settings.r2Slots.length; i++) {
       const marker = `r2:${i}`;
       const family = slotFamily(i);

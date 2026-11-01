@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
+import { isAdminRole, isSuper } from "@/lib/roles";
 import { cachedJson, invalidateJson } from "@/lib/cache";
 import { logActivity } from "@/server/audit.service";
 import { hasAccessTo } from "@/server/access.service";
@@ -58,15 +59,20 @@ export function toDTO(img: Image & { user?: { name: string } }): ImageDTO {
 
 // ============ 可见性判定 ============
 // PUBLIC: 所有用户可见（含未登录，可作免登录外链）；UNLISTED（友链）: 登录任意账户即可见，不进列表；
-// PRIVATE: 仅本人/管理员
-// PENDING（待审核）：仅本人与管理员可见——匿名外链与其他登录用户都不可见，审核通过后才对公开可见
+// PRIVATE: 仅本人/超级管理员
+// PENDING（待审核）：本人、两级管理员可见（管理员需看到待审队列）——匿名外链与其他登录用户都不可见
 export function canView(img: Image, viewer: Viewer | null): boolean {
-  if (viewer?.role === "ADMIN") return true;
-  if (img.userId === viewer?.id) return true;
+  if (!viewer) {
+    // 匿名访客：仅公开且已过审
+    return img.status === "PUBLISHED" && img.visibility === "PUBLIC";
+  }
+  if (isSuper(viewer.role)) return true; // 超级管理员可见全部
+  if (img.userId === viewer.id) return true;
+  if (isAdminRole(viewer.role) && img.status === "PENDING") return true; // 管理员审核需要
   if (img.status !== "PUBLISHED") return false;
   if (img.visibility === "PUBLIC") return true;
   // 友链：登录任意账户即可见（未登录访客不可见）
-  return img.visibility === "UNLISTED" && !!viewer;
+  return img.visibility === "UNLISTED";
 }
 
 // 单张图片访问校验（防 IDOR）。PRIVATE/PENDING 之外再放宽一档：
@@ -79,7 +85,7 @@ export async function getImageForView(id: string, viewer: Viewer | null, include
     const granted =
       !!viewer &&
       img.status === "PUBLISHED" &&
-      viewer.role !== "ADMIN" &&
+      !isSuper(viewer.role) &&
       img.userId !== viewer.id &&
       (await hasAccessTo(viewer.id, img.userId));
     if (!granted) throw new AppError("无权访问该图片", viewer ? 403 : 401);
@@ -128,7 +134,7 @@ export async function invalidateImageView(...ids: string[]) {
 export async function requestReview(id: string, viewer: Viewer): Promise<ImageDTO> {
   const img = await prisma.image.findUnique({ where: { id } });
   if (!img || img.deletedAt) throw new AppError("图片不存在", 404);
-  if (img.userId !== viewer.id && viewer.role !== "ADMIN") throw new AppError("无权操作该图片", 403);
+  if (img.userId !== viewer.id && !isAdminRole(viewer.role)) throw new AppError("无权操作该图片", 403);
   if (img.status === "PENDING") return toDTO(img);
   const updated = await prisma.image.update({ where: { id }, data: { status: "PENDING" } });
   await invalidateImageView(id);
@@ -137,7 +143,7 @@ export async function requestReview(id: string, viewer: Viewer): Promise<ImageDT
 
 // 审核通过（管理员）：待审核图片进入画廊
 export async function approveImage(id: string, viewer: Viewer): Promise<ImageDTO> {
-  if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+  if (!isAdminRole(viewer.role)) throw new AppError("无权限", 403);
   const img = await prisma.image.findUnique({ where: { id } });
   if (!img || img.deletedAt) throw new AppError("图片不存在", 404);
   if (img.status === "PUBLISHED") return toDTO(img);
@@ -193,11 +199,11 @@ export async function uploadImages(
   return { results, deduped };
 }
 
-// 相册归属校验（上传/更新共用）：相册必须存在且属于本人（管理员可操作任意相册）
+// 相册归属校验（上传/更新共用）：相册必须存在且属于本人（仅超级管理员可操作任意相册）
 export async function assertAlbumAccess(viewer: Viewer, albumId: string | null) {
   if (!albumId) return;
   const album = await prisma.album.findUnique({ where: { id: albumId } });
-  if (!album || (album.userId !== viewer.id && viewer.role !== "ADMIN")) {
+  if (!album || (album.userId !== viewer.id && !isSuper(viewer.role))) {
     throw new AppError("相册不存在或无权访问", 403);
   }
 }
@@ -251,9 +257,9 @@ async function uploadOne(
       sha256: processed.sha256,
       blurhash: processed.blurhash,
       albumId,
-      // 默认私有：不进公共画廊，用户在「我的图片」勾选后才公开（管理员上传免审核直接发布）
+      // 默认私有：不进公共画廊，用户在「我的图片」勾选后才公开（两级管理员上传免审核直接发布）
       visibility: "PRIVATE",
-      status: user.role === "ADMIN" ? "PUBLISHED" : "PENDING",
+      status: isAdminRole(user.role) ? "PUBLISHED" : "PENDING",
     },
     include: { user: { select: { name: true } } },
   });
@@ -302,7 +308,7 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
       if (!p.albumId) throw new AppError("缺少相册参数", 400);
       const album = await prisma.album.findUnique({ where: { id: p.albumId } });
       if (!album) throw new AppError("相册不存在", 404);
-      const isOwner = album.userId === p.viewer.id || p.viewer.role === "ADMIN";
+      const isOwner = album.userId === p.viewer.id || isSuper(p.viewer.role);
       if (!isOwner && album.visibility !== "PUBLIC") throw new AppError("无权访问该相册", 403);
       where.albumId = p.albumId;
       where.deletedAt = null;
@@ -319,7 +325,7 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
       if (!target) throw new AppError("用户不存在", 404);
       where.userId = target.id;
       where.deletedAt = null;
-      if (target.id !== p.viewer.id && p.viewer.role !== "ADMIN") {
+      if (target.id !== p.viewer.id && !isSuper(p.viewer.role)) {
         // 已获授权（申请-审批通过）：可见对方全部已发布图片（含 PRIVATE）；否则仅公开
         const granted = await hasAccessTo(p.viewer.id, target.id);
         if (granted) {
@@ -332,9 +338,15 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
       break;
     }
     case "admin":
-      // 管理员全站列表
-      if (p.viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+      // 管理员全站列表：超级管理员看全部；
+      // 普通管理员仅放行日常记录（posted=1，动态关联的公开图片），不能翻全站私有/待审内容
+      if (!isAdminRole(p.viewer.role)) throw new AppError("无权限", 403);
       where.deletedAt = null;
+      if (!isSuper(p.viewer.role)) {
+        if (!p.posted) throw new AppError("无权限", 403);
+        where.visibility = "PUBLIC";
+        where.status = "PUBLISHED";
+      }
       break;
   }
 
@@ -405,7 +417,7 @@ export async function getImageDetail(id: string, viewer: Viewer | null) {
 async function assertOwnership(id: string, viewer: Viewer) {
   const img = await prisma.image.findUnique({ where: { id } });
   if (!img) throw new AppError("图片不存在", 404);
-  if (img.userId !== viewer.id && viewer.role !== "ADMIN") throw new AppError("无权操作该图片", 403);
+  if (img.userId !== viewer.id && !isSuper(viewer.role)) throw new AppError("无权操作该图片", 403);
   return img;
 }
 
@@ -413,7 +425,7 @@ export async function updateImage(id: string, viewer: Viewer, data: { filename?:
   const old = await assertOwnership(id, viewer);
   if (data.albumId) {
     const album = await prisma.album.findUnique({ where: { id: data.albumId } });
-    if (!album || (album.userId !== viewer.id && viewer.role !== "ADMIN")) {
+    if (!album || (album.userId !== viewer.id && !isSuper(viewer.role))) {
       throw new AppError("相册不存在或无权访问", 403);
     }
   }
@@ -471,7 +483,7 @@ export async function purgeImage(id: string, viewer: Viewer) {
 export async function purgeExpiredTrash() {
   const cutoff = new Date(Date.now() - 30 * 24 * 3600_000);
   const expired = await prisma.image.findMany({ where: { deletedAt: { lt: cutoff } } });
-  const viewer = { id: "system", role: "ADMIN" };
+  const viewer = { id: "system", role: "SUPERADMIN" };
   for (const img of expired) {
     await purgeImage(img.id, viewer).catch(() => {});
   }
@@ -483,9 +495,9 @@ const VIS_TEXT: Record<string, string> = { PUBLIC: "公开", UNLISTED: "友链",
 
 export async function batchImages(viewer: Viewer, input: z.infer<typeof batchActionSchema>) {
   const { ids, action } = input;
-  // 归属校验：仅能操作自己的图片（管理员除外）
+  // 归属校验：仅能操作自己的图片（超级管理员除外）
   const owned = await prisma.image.findMany({
-    where: { id: { in: ids }, ...(viewer.role === "ADMIN" ? {} : { userId: viewer.id }) },
+    where: { id: { in: ids }, ...(isSuper(viewer.role) ? {} : { userId: viewer.id }) },
   });
   if (owned.length === 0) throw new AppError("没有可操作的图片", 404);
 
@@ -524,7 +536,7 @@ export async function batchImages(viewer: Viewer, input: z.infer<typeof batchAct
     case "album": {
       if (input.albumId) {
         const album = await prisma.album.findUnique({ where: { id: input.albumId } });
-        if (!album || (album.userId !== viewer.id && viewer.role !== "ADMIN")) {
+        if (!album || (album.userId !== viewer.id && !isSuper(viewer.role))) {
           throw new AppError("相册不存在或无权访问", 403);
         }
       }
@@ -560,14 +572,14 @@ export async function listAlbums(viewer: Viewer, username?: string) {
     const target = await prisma.user.findUnique({ where: { name: username } });
     if (!target) throw new AppError("用户不存在", 404);
     userId = target.id;
-  } else if (viewer.role !== "ADMIN") {
-    // 相册管理页：普通用户只能看到自己的相册，管理员可见全部人的
+  } else if (!isSuper(viewer.role)) {
+    // 相册管理页：普通用户与普通管理员只能看到自己的相册，超级管理员可见全部人的
     userId = viewer.id;
   }
   const albums = await prisma.album.findMany({
     where: {
       ...(userId ? { userId } : {}),
-      ...(userId && userId !== viewer.id && viewer.role !== "ADMIN" ? { visibility: "PUBLIC" } : {}),
+      ...(userId && userId !== viewer.id && !isSuper(viewer.role) ? { visibility: "PUBLIC" } : {}),
     },
     orderBy: { createdAt: "desc" },
     include: {
@@ -606,7 +618,7 @@ export async function listAlbums(viewer: Viewer, username?: string) {
     imageCount: a._count.images,
     createdAt: a.createdAt,
     // 管理员视角附带相册主人，便于区分所有人的相册
-    ownerName: viewer.role === "ADMIN" ? a.user.name : undefined,
+    ownerName: isAdminRole(viewer.role) ? a.user.name : undefined,
     coverUrl: a.coverImageId && !videoCovers.has(a.coverImageId) ? `/api/images/${a.coverImageId}/thumb` : fallbacks.get(a.id) ?? null,
   }));
 }
@@ -620,7 +632,7 @@ export async function createAlbum(viewer: Viewer, input: z.infer<typeof albumCre
 export async function updateAlbum(id: string, viewer: Viewer, input: z.infer<typeof albumUpdateSchema>) {
   const album = await prisma.album.findUnique({ where: { id } });
   if (!album) throw new AppError("相册不存在", 404);
-  if (album.userId !== viewer.id && viewer.role !== "ADMIN") throw new AppError("无权操作", 403);
+  if (album.userId !== viewer.id && !isSuper(viewer.role)) throw new AppError("无权操作", 403);
   if (input.coverImageId != null) {
     const img = await prisma.image.findUnique({ where: { id: input.coverImageId } });
     if (!img || img.albumId !== id) throw new AppError("封面图片必须属于该相册", 400);
@@ -631,7 +643,7 @@ export async function updateAlbum(id: string, viewer: Viewer, input: z.infer<typ
 export async function deleteAlbum(id: string, viewer: Viewer) {
   const album = await prisma.album.findUnique({ where: { id } });
   if (!album) throw new AppError("相册不存在", 404);
-  if (album.userId !== viewer.id && viewer.role !== "ADMIN") throw new AppError("无权操作", 403);
+  if (album.userId !== viewer.id && !isSuper(viewer.role)) throw new AppError("无权操作", 403);
   await prisma.album.delete({ where: { id } }); // images.albumId SetNull
 }
 
@@ -644,7 +656,7 @@ export async function getAlbumForView(idOrSlug: string, viewer: Viewer) {
     },
   });
   if (!album) throw new AppError("相册不存在", 404);
-  const isOwner = album.userId === viewer.id || viewer.role === "ADMIN";
+  const isOwner = album.userId === viewer.id || isSuper(viewer.role);
   if (!isOwner && album.visibility !== "PUBLIC") throw new AppError("无权访问该相册", 403);
   return { ...album, imageCount: album._count.images };
 }

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/session";
+import { isSuper } from "@/lib/roles";
 import { getAlbumForView, listImages } from "@/server/image.service";
 import { AlbumDetailClient } from "@/components/album-detail-client";
 import { GalleryView } from "@/components/gallery-view";
@@ -17,7 +18,7 @@ export default async function AlbumPage({ params }: { params: Promise<{ id: stri
       scope: "album",
       albumId: album.id,
     });
-    const isOwner = album.userId === viewer.id || viewer.role === "ADMIN";
+    const isOwner = album.userId === viewer.id || isSuper(viewer.role);
 
     return isOwner ? (
       <AlbumDetailClient

@@ -1,5 +1,5 @@
 import { handle, assertSameOrigin, ok, AppError } from "@/lib/api";
-import { requireApiUser } from "@/lib/session";
+import { requireApiSuper } from "@/lib/session";
 import { testR2Connection } from "@/lib/storage/r2";
 import { getSettings } from "@/lib/settings";
 import { z } from "zod";
@@ -21,8 +21,7 @@ const schema = z.object({
 // R2 连接测试：真实写入并删除一个探测对象，验证端点、密钥与读写权限
 export const POST = handle(async (req: Request) => {
   assertSameOrigin(req);
-  const viewer = await requireApiUser();
-  if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+  await requireApiSuper();
   const input = schema.parse(await req.json());
   if (!input.accountId && !input.endpoint) throw new AppError("缺少 Account ID（或自定义端点）", 400);
   let secret = input.secretAccessKey;

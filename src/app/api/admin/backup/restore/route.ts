@@ -1,10 +1,10 @@
 import { handle, assertSameOrigin, ok, AppError } from "@/lib/api";
-import { requireApiAdmin } from "@/lib/session";
+import { requireApiSuper } from "@/lib/session";
 import { restoreBackup } from "@/server/backup.service";
 
 // 还原站点备份：请求体即备份文件原始字节（流式解包，覆盖全部数据与存储）
 export const POST = handle(async (req: Request) => {
-  await requireApiAdmin();
+  await requireApiSuper();
   assertSameOrigin(req);
   if (!req.body) throw new AppError("缺少备份文件", 400);
   const ct = req.headers.get("content-type") ?? "";

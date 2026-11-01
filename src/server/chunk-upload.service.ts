@@ -6,6 +6,7 @@ import path from "path";
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
+import { isAdminRole } from "@/lib/roles";
 import { logActivity } from "@/server/audit.service";
 import { storageRoot } from "@/lib/storage/local";
 import { processAndStoreImage, processAndStoreVideoFile, detectImageMime, detectVideoMime } from "@/lib/image";
@@ -214,9 +215,9 @@ export async function completeChunkUpload(user: User, id: string): Promise<Image
       sha256: processed.sha256,
       blurhash: processed.blurhash,
       albumId,
-      // 默认私有：不进公共画廊，用户在「我的图片」勾选后才公开（管理员上传免审核直接发布）
+      // 默认私有：不进公共画廊，用户在「我的图片」勾选后才公开（两级管理员上传免审核直接发布）
       visibility: "PRIVATE",
-      status: user.role === "ADMIN" ? "PUBLISHED" : "PENDING",
+      status: isAdminRole(user.role) ? "PUBLISHED" : "PENDING",
     },
     include: { user: { select: { name: true } } },
   });

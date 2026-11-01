@@ -90,8 +90,8 @@ export function AdminUsersClient() {
 
   // 批量封禁/解封（逐个调用 PATCH，失败的用户计数提示）
   async function batchStatus(status: "ACTIVE" | "BANNED") {
-    // 批量封禁自动跳过管理员，避免把唯一管理员封禁导致后台失去管理能力
-    const targets = users.filter((u) => selected.has(u.id) && !(status === "BANNED" && u.role === "ADMIN"));
+    // 批量封禁自动跳过管理员（含超级管理员），避免把唯一管理员封禁导致后台失去管理能力
+    const targets = users.filter((u) => selected.has(u.id) && !(status === "BANNED" && u.role !== "USER"));
     const skipped = selected.size - targets.length;
     if (targets.length === 0) {
       toast.error(skipped > 0 ? "所选均为管理员，批量封禁已跳过" : "请先选择用户");
@@ -147,7 +147,7 @@ export function AdminUsersClient() {
 
   // 批量删除：跳过自己与管理员（与单个删除的保护规则一致），永久删除其全部数据
   async function batchDelete() {
-    const targets = users.filter((u) => selected.has(u.id) && !u.isSelf && u.role !== "ADMIN");
+    const targets = users.filter((u) => selected.has(u.id) && !u.isSelf && u.role !== "USER");
     const skipped = selected.size - targets.length;
     if (targets.length === 0) {
       toast.error(skipped > 0 ? "所选均为管理员或自己，批量删除已跳过" : "请先选择用户");
@@ -323,7 +323,7 @@ export function AdminUsersClient() {
                         <Crown className="h-3 w-3" /> 超级管理员
                       </Badge>
                     ) : (
-                      <Badge variant={u.role === "ADMIN" ? "default" : "secondary"}>{u.role}</Badge>
+                      <Badge variant={u.role === "ADMIN" ? "default" : "secondary"}>{u.role === "ADMIN" ? "管理员" : "用户"}</Badge>
                     )}
                   </td>
                   <td className="p-2.5">
@@ -392,8 +392,8 @@ export function AdminUsersClient() {
                       <Button size="sm" variant="outline" disabled={updating === u.id} onClick={() => adjustQuota(u)}>
                         配额
                       </Button>
-                      {/* 删除用户：自己与管理员不显示（管理员需先降级） */}
-                      {!u.isSelf && u.role !== "ADMIN" && (
+                      {/* 删除用户：自己与管理员（含超级管理员）不显示（管理员需先降级） */}
+                      {!u.isSelf && u.role !== "USER" && (
                         <Button
                           size="sm"
                           variant="destructive"

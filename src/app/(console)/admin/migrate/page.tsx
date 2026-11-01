@@ -1,12 +1,12 @@
-import { requireAdmin } from "@/lib/session";
+import { requireSuper } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 import { slotConfigured, slotDisplayName } from "@/lib/markers";
 import { migrationStatus } from "@/server/migration.service";
 import { MigrateClient, type MarkerOpt } from "@/components/migrate-client";
 
-// 存储迁移管理：独立页面，逐张勾选要迁移的图片（本地照片只有在这里手动迁移才会进入存储桶）
+// 存储迁移管理：独立页面，逐张勾选要迁移的图片（本地照片只有在这里手动迁移才会进入存储桶）。仅超级管理员
 export default async function AdminMigratePage() {
-  await requireAdmin();
+  await requireSuper();
   const s = await getSettings();
   const markers: MarkerOpt[] = [
     { marker: "local", label: "本地" },

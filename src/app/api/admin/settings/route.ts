@@ -1,5 +1,5 @@
 import { handle, assertSameOrigin, ok, AppError } from "@/lib/api";
-import { requireApiUser } from "@/lib/session";
+import { requireApiSuper } from "@/lib/session";
 import { adminSettingsSchema } from "@/lib/validation";
 import { getSettings, saveSettings, sanitizeSettings } from "@/lib/settings";
 import { logActivity } from "@/server/audit.service";
@@ -8,15 +8,13 @@ export const runtime = "nodejs";
 
 // 返回前脱敏：R2 Secret / SMTP 授权码永不下发浏览器（置空 + has* 标记）
 export const GET = handle(async () => {
-  const viewer = await requireApiUser();
-  if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+  await requireApiSuper();
   return ok(sanitizeSettings(await getSettings()));
 });
 
 export const PUT = handle(async (req: Request) => {
   assertSameOrigin(req);
-  const viewer = await requireApiUser();
-  if (viewer.role !== "ADMIN") throw new AppError("无权限", 403);
+  const viewer = await requireApiSuper();
   const input = adminSettingsSchema.parse(await req.json());
   // 密钥只写不读：提交留空表示保持原值
   const current = await getSettings();

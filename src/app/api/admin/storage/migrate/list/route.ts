@@ -1,12 +1,12 @@
 import { handle, ok, AppError } from "@/lib/api";
-import { requireApiAdmin } from "@/lib/session";
+import { requireApiSuper } from "@/lib/session";
 import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
 
 // 迁移页图片列表：按存储位置分页列出（迁移管理页勾选要迁移的图片）
 export const GET = handle(async (req: Request) => {
-  await requireApiAdmin();
+  await requireApiSuper();
   const url = new URL(req.url);
   const marker = url.searchParams.get("marker") ?? "local";
   if (marker !== "local" && !/^r2:\d+$/.test(marker)) throw new AppError("无效的存储位置", 400);
