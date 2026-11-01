@@ -97,7 +97,12 @@ export function TrashClient() {
                   className="aspect-square w-full cursor-pointer bg-muted object-cover"
                   onClick={() => toggle(img.id)}
                 />
-                <label className="absolute left-2 top-2 cursor-pointer">
+                {/* 勾选按钮：未选中任何图片时 hover 才显示；本卡片已选中或页面有选中时常驻 */}
+                <label
+                  className={`absolute left-2 top-2 cursor-pointer transition-opacity ${
+                    selected.has(img.id) || selected.size > 0 ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                  }`}
+                >
                   <input
                     type="checkbox"
                     className="h-4 w-4"

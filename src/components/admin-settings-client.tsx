@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus, Trash2, Unplug, ScrollText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/controls";
+import { Switch, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/controls";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AdminLogsClient } from "@/components/admin-logs-client";
 import type { R2SlotConfig, SiteSettings } from "@/lib/settings";
 import type { SyncStatus } from "@/server/r2-sync.service";
 import { SLOT_TYPES, slotConfigured, slotDisplayName, type SlotType } from "@/lib/markers";
@@ -108,6 +110,8 @@ export function AdminSettingsClient() {
   // 备份与还原
   const [restoring, setRestoring] = useState(false);
   const restoreInputRef = useRef<HTMLInputElement>(null);
+  // 操作日志弹窗：独立按钮打开，不占用设置页版面
+  const [logsOpen, setLogsOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/admin/settings")
@@ -283,6 +287,25 @@ export function AdminSettingsClient() {
     setForm({ ...form, r2Slots: slots, r2UploadSlot: uploadSlot });
   }
 
+  // 断开连接：保留槽位（含类型与显示名），清空桶的全部连接配置；点「保存存储设置」后生效
+  function disconnectSlot(i: number) {
+    if (!form) return;
+    const s = form.r2Slots[i];
+    if (
+      !confirm(
+        `断开 ${slotDisplayName(s, i, form.r2Slots.length)} 的连接？\n\n将清空该桶的 Account ID / Access Key / Secret / Bucket 配置，点「保存存储设置」后生效。\n若该桶中仍有图片（未迁移走），断开后这些图片将无法访问。`
+      )
+    )
+      return;
+    setForm({
+      ...form,
+      r2Slots: form.r2Slots.map((slot, n) =>
+        n === i ? { ...slot, accountId: "", accessKeyId: "", secretAccessKey: "", bucket: "", region: "", endpoint: "" } : slot
+      ),
+    });
+    toast.success("已断开连接，点「保存存储设置」后生效");
+  }
+
   // R2 记录一致性校验：数据库记录 vs 桶内真实对象
   async function checkR2() {
     setRc({ running: true, result: null });
@@ -422,6 +445,13 @@ export function AdminSettingsClient() {
           <p className="text-xs font-medium">
             {slotDisplayName(s, i, form.r2Slots.length)}
             <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground">{typeName}</span>
+            <span
+              className={`ml-1.5 rounded px-1.5 py-0.5 text-[0.6875rem] font-medium ${
+                slotConfigured(s) ? "bg-emerald-500/15 text-emerald-600" : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {slotConfigured(s) ? "已配置" : "未配置"}
+            </span>
           </p>
           <div className="flex items-center gap-4">
             <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
@@ -433,6 +463,15 @@ export function AdminSettingsClient() {
               />
               设为上传目标
             </label>
+            {slotConfigured(s) && (
+              <button
+                onClick={() => disconnectSlot(i)}
+                className="flex items-center gap-1 text-xs text-amber-600 transition-colors hover:text-amber-500"
+                title="保留槽位，清空该桶的全部连接配置（保存后生效）"
+              >
+                <Unplug className="h-3.5 w-3.5" /> 断开连接
+              </button>
+            )}
             <button
               onClick={() => removeSlot(i)}
               className="flex items-center gap-1 text-xs text-red-500/80 transition-colors hover:text-red-500"
@@ -601,9 +640,24 @@ export function AdminSettingsClient() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-xl font-bold">站点设置</h1>
-      {/* 单列布局：一张卡片占满一行 */}
-      <div className="space-y-4">
+      {/* 标题行：站点设置 + 操作日志按钮（点击弹出日志，不再单独占一个页签/版面） */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-xl font-bold">站点设置</h1>
+        <Button variant="outline" onClick={() => setLogsOpen(true)}>
+          <ScrollText className="h-4 w-4" /> 操作日志
+        </Button>
+      </div>
+      {/* 分区页签：点击上方按钮切换到对应设置项，一次只显示一个区块 */}
+      <Tabs defaultValue="sec-general" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="sec-general">常规</TabsTrigger>
+          <TabsTrigger value="sec-mail">邮件配置</TabsTrigger>
+          <TabsTrigger value="sec-redis">Redis 缓存</TabsTrigger>
+          <TabsTrigger value="sec-storage">存储设置</TabsTrigger>
+          <TabsTrigger value="sec-backup">备份与还原</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="sec-general">
       <Card className="cv-auto">
         <CardHeader>
           <CardTitle className="text-base">常规</CardTitle>
@@ -637,7 +691,9 @@ export function AdminSettingsClient() {
           </Button>
         </CardContent>
       </Card>
+        </TabsContent>
 
+        <TabsContent value="sec-mail">
       <Card className="cv-auto">
         <CardHeader>
           <CardTitle className="text-base">邮件配置</CardTitle>
@@ -710,7 +766,9 @@ export function AdminSettingsClient() {
           <p className="text-xs text-muted-foreground">测试邮件发送至当前管理员邮箱，需先保存配置。</p>
         </CardContent>
       </Card>
+        </TabsContent>
 
+        <TabsContent value="sec-redis">
       <Card className="cv-auto">
         <CardHeader>
           <CardTitle className="text-base">Redis 缓存（可选）</CardTitle>
@@ -719,7 +777,7 @@ export function AdminSettingsClient() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <Label htmlFor="redis-enabled">启用 Redis</Label>
-              <p className="mt-0.5 text-xs text-muted-foreground">关闭时限流走进程内存（单实例足够），开启后按下方地址连接</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">开启后 Redis 负责两件事：接口限流 + 公开图片直链缓存（外链/缩略图免查库直出，减少数据库压力）；关闭时自动降级进程内存，功能不受影响</p>
             </div>
             <Switch
               id="redis-enabled"
@@ -758,12 +816,12 @@ export function AdminSettingsClient() {
                 }`}
               >
                 {redis.status === "connected"
-                  ? "已连接 · 限流走 Redis"
+                  ? "已连接 · 限流与直链缓存走 Redis"
                   : redis.status === "error"
                     ? "连接失败 · 已降级内存"
                     : redis.enabled
                       ? "已启用 · 未连接"
-                      : "未启用 · 内存限流"}
+                      : "未启用 · 限流与缓存走内存"}
               </span>
             )}
             {redis?.url && <span className="truncate text-xs text-muted-foreground">{redis.url}</span>}
@@ -780,7 +838,9 @@ export function AdminSettingsClient() {
           {redis?.status === "error" && redis.error && <p className="text-xs text-destructive">{redis.error}</p>}
         </CardContent>
       </Card>
+        </TabsContent>
 
+        <TabsContent value="sec-storage">
       <Card className="cv-auto">
         <CardHeader>
           <CardTitle className="text-base">存储设置</CardTitle>
@@ -840,18 +900,8 @@ export function AdminSettingsClient() {
             </Button>
           </div>
 
-          {/* 存量迁移已独立成页：/admin/migrate（逐张勾选、带存储徽标） */}
-          <div className="space-y-3 border-t border-border pt-4">
-            <Label>存量图片迁移</Label>
-            <p className="text-xs text-muted-foreground">
-              已独立为「存储迁移」页面：可选源位置与目标位置，逐张勾选要迁移的图片（每张带 本地 / R2 存储徽标），
-              本地照片只有在该页面手动迁移才会进入存储桶。
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => router.push("/admin/migrate")}>打开存储迁移</Button>
-            </div>
-            {/* R2 记录一致性校验：数据库记录 vs 桶内真实对象（孤儿记录清理） */}
-            <div className="space-y-2 border-t pt-4">
+          {/* R2 记录一致性校验：数据库记录 vs 桶内真实对象（孤儿记录清理） */}
+          <div className="space-y-2 border-t pt-4">
               <Label>记录一致性校验</Label>
               <p className="text-xs text-muted-foreground">
                 逐个核对指向 R2 的记录与桶内真实对象。若曾在 Cloudflare 后台直接清空过桶，数据库会残留孤儿记录
@@ -873,14 +923,15 @@ export function AdminSettingsClient() {
                   </Button>
                 )}
               </div>
-            </div>
-
-            {/* R2 实时同步：独立子组件（自带 10s 轮询），状态更新只重渲染本面板，不拖累整页长表单 */}
-            <SyncStatusPanel />
           </div>
+
+          {/* R2 实时同步：独立子组件（自带 10s 轮询），状态更新只重渲染本面板，不拖累整页长表单 */}
+          <SyncStatusPanel />
         </CardContent>
       </Card>
+        </TabsContent>
 
+        <TabsContent value="sec-backup">
       <Card className="cv-auto">
         <CardHeader>
           <CardTitle className="text-base">备份与还原</CardTitle>
@@ -908,7 +959,20 @@ export function AdminSettingsClient() {
           <p className="text-xs text-muted-foreground">还原期间请勿进行上传等操作；还原完成后页面将自动刷新。</p>
         </CardContent>
       </Card>
-      </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* 操作日志弹窗：独立按钮打开（每页 10 条，翻页查看） */}
+      <Dialog open={logsOpen} onOpenChange={setLogsOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>操作日志</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[65vh] overflow-y-auto pr-1">
+            <AdminLogsClient hideHeader />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

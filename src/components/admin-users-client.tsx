@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Ban, ShieldCheck, Crown, UserPlus, Trash2 } from "lucide-react";
+import { Loader2, Ban, ShieldCheck, Crown, UserPlus, Trash2, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { PasswordInput } from "@/components/password-input";
@@ -21,6 +21,7 @@ type AdminUser = {
   imageCount: number;
   createdAt: string;
   isSelf?: boolean;
+  isSuperAdmin?: boolean;
 };
 
 // 用户管理：搜索、封禁/解封、调整角色与配额
@@ -33,6 +34,10 @@ export function AdminUsersClient() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ email: "", name: "", password: "", role: "USER", quotaGB: "" });
+  // 重置密码弹窗（超级管理员不提供该操作）
+  const [resetTarget, setResetTarget] = useState<AdminUser | null>(null);
+  const [resetPwd, setResetPwd] = useState("");
+  const [resetting, setResetting] = useState(false);
   // 多选批量操作
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -181,6 +186,27 @@ export function AdminUsersClient() {
     update(u.id, { storageQuotaGB: n });
   }
 
+  // 提交重置密码（超级管理员不可重置，后端同样校验）
+  async function submitResetPassword() {
+    if (!resetTarget) return;
+    setResetting(true);
+    try {
+      const res = await fetch(`/api/admin/users/${resetTarget.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: resetPwd }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        toast.success(`已重置 ${resetTarget.name} 的密码`);
+        setResetTarget(null);
+        setResetPwd("");
+      } else toast.error(json.error);
+    } finally {
+      setResetting(false);
+    }
+  }
+
   async function createUser() {
     setCreating(true);
     try {
@@ -292,7 +318,13 @@ export function AdminUsersClient() {
                     <p className="text-xs text-muted-foreground">{u.email}</p>
                   </td>
                   <td className="p-2.5">
-                    <Badge variant={u.role === "ADMIN" ? "default" : "secondary"}>{u.role}</Badge>
+                    {u.isSuperAdmin ? (
+                      <Badge variant="default" className="gap-1">
+                        <Crown className="h-3 w-3" /> 超级管理员
+                      </Badge>
+                    ) : (
+                      <Badge variant={u.role === "ADMIN" ? "default" : "secondary"}>{u.role}</Badge>
+                    )}
                   </td>
                   <td className="p-2.5">
                     <Badge variant={u.status === "ACTIVE" ? "outline" : "destructive"}>
@@ -306,9 +338,9 @@ export function AdminUsersClient() {
                   <td className="p-2.5 text-muted-foreground">{shortDate(u.createdAt)}</td>
                   <td className="p-2.5">
                     <div className="flex gap-1">
-                      {/* 不能封禁自己：隐藏按钮 */}
+                      {/* 不能封禁自己/超级管理员：隐藏按钮 */}
                       {u.status === "ACTIVE" ? (
-                        !u.isSelf && (
+                        !u.isSelf && !u.isSuperAdmin && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -328,18 +360,35 @@ export function AdminUsersClient() {
                           <ShieldCheck className="h-3 w-3" /> 解封
                         </Button>
                       )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={updating === u.id}
-                        onClick={() => {
-                          if (u.role === "ADMIN" && !confirm(`确定将 ${u.name} 降级为普通用户？`)) return;
-                          update(u.id, { role: u.role === "ADMIN" ? "USER" : "ADMIN" });
-                        }}
-                      >
-                        <Crown className="h-3 w-3" />
-                        {u.role === "ADMIN" ? "降级" : "设管理员"}
-                      </Button>
+                      {/* 超级管理员不可降级：隐藏按钮 */}
+                      {!u.isSuperAdmin && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={updating === u.id}
+                          onClick={() => {
+                            if (u.role === "ADMIN" && !confirm(`确定将 ${u.name} 降级为普通用户？`)) return;
+                            update(u.id, { role: u.role === "ADMIN" ? "USER" : "ADMIN" });
+                          }}
+                        >
+                          <Crown className="h-3 w-3" />
+                          {u.role === "ADMIN" ? "降级" : "设管理员"}
+                        </Button>
+                      )}
+                      {/* 重置密码：所有用户均可（超级管理员除外），弹窗输入新密码 */}
+                      {!u.isSuperAdmin && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={updating === u.id}
+                          onClick={() => {
+                            setResetPwd("");
+                            setResetTarget(u);
+                          }}
+                        >
+                          <KeyRound className="h-3 w-3" /> 重置密码
+                        </Button>
+                      )}
                       <Button size="sm" variant="outline" disabled={updating === u.id} onClick={() => adjustQuota(u)}>
                         配额
                       </Button>
@@ -418,6 +467,31 @@ export function AdminUsersClient() {
             <Button className="w-full" disabled={creating} onClick={createUser}>
               {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
               创建
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {/* 重置密码弹窗 */}
+      <Dialog open={!!resetTarget} onOpenChange={(open) => !open && setResetTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>重置密码{resetTarget ? ` — ${resetTarget.name}` : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              为 {resetTarget?.email} 设置新密码，设置后请告知该用户用新密码登录。
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-sm text-muted-foreground">新密码</label>
+              <PasswordInput
+                placeholder="至少 8 位，含大小写字母与数字"
+                value={resetPwd}
+                onChange={(e) => setResetPwd(e.target.value)}
+              />
+            </div>
+            <Button className="w-full" disabled={resetting || !resetPwd} onClick={submitResetPassword}>
+              {resetting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+              确认重置
             </Button>
           </div>
         </DialogContent>

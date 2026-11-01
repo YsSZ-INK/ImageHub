@@ -9,12 +9,14 @@ import type { ImageDTO } from "@/server/image.service";
 // 从已缓存的最远游标逐页前进收集游标直到目标页，目标超出实际页数时回落到最后的非空页。
 export function useCursorPager(
   params: Record<string, string | undefined>,
-  opts?: { initialItems?: ImageDTO[]; initialCursor?: string | null }
+  opts?: { initialItems?: ImageDTO[]; initialCursor?: string | null; take?: number }
 ) {
   const [items, setItems] = useState<ImageDTO[]>(opts?.initialItems ?? []);
   const [page, setPage] = useState(1);
   const [pageCursors, setPageCursors] = useState<(string | null)[]>([null, opts?.initialCursor ?? null]);
   const [hasNext, setHasNext] = useState(!!opts?.initialCursor);
+  // 匹配当前筛选的图片总数（服务端返回），用于显示「共 N 页」
+  const [total, setTotal] = useState<number | null>(null);
   // 服务端已渲染首屏时初始无需 loading
   const [loading, setLoading] = useState(!opts?.initialItems);
   // 序列化为稳定依赖，避免调用方传入对象字面量导致每次渲染重建回调
@@ -45,6 +47,7 @@ export function useCursorPager(
           setItems(json.data.items);
           setPage(target);
           setHasNext(!!json.data.nextCursor);
+          if (typeof json.data.total === "number") setTotal(json.data.total);
           if (json.data.nextCursor) {
             setPageCursors((prev) => {
               const nx = [...prev];
@@ -127,5 +130,6 @@ export function useCursorPager(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  return { items, page, hasNext, loading, loadPage, gotoPage };
+  const totalPages = total == null ? null : Math.max(1, Math.ceil(total / (opts?.take ?? 24)));
+  return { items, page, hasNext, loading, total, totalPages, loadPage, gotoPage };
 }

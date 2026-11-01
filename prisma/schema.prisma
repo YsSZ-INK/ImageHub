@@ -26,11 +26,14 @@ model User {
   images    Image[]
   albums    Album[]
   posts     Post[]
+  postComments PostComment[]
+  activityLogs ActivityLog[]
   apiTokens ApiToken[]
   tokens    Token[]
   uploadSessions UploadSession[]
   sentAccessRequests     ImageAccessRequest[] @relation("accessRequestsSent")
   receivedAccessRequests ImageAccessRequest[] @relation("accessRequestsReceived")
+  commentReplyTargets    PostComment[]        @relation("CommentReplyTarget")
 }
 
 model Image {
@@ -71,10 +74,45 @@ model Post {
   caption   String   @default("")
   createdAt DateTime @default(now())
 
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  images Image[]
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images   Image[]
+  comments PostComment[]
 
   @@index([createdAt])
+}
+
+// 动态评论：登录用户可评论；删除限本人或管理员。
+// 回复：parentId 指向所属顶层评论（一层线程结构，回复回复时归并到同一顶层）；replyToUserId 记录被回复人，展示「回复 @某人」
+model PostComment {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+  parentId      String?
+  replyToUserId String?
+
+  post        Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent      PostComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies     PostComment[] @relation("CommentReplies")
+  replyToUser User?         @relation("CommentReplyTarget", fields: [replyToUserId], references: [id], onDelete: SetNull)
+
+  @@index([postId, createdAt])
+  @@index([parentId])
+}
+
+// 站点操作日志：管理员在「站点设置 → 操作日志」查看（谁在什么时间做了什么）
+model ActivityLog {
+  id        String   @id @default(cuid())
+  action    String
+  detail    String
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId    String?
+
+  @@index([createdAt])
+  @@index([userId])
 }
 
 model Album {

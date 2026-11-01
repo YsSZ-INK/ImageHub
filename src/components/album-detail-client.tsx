@@ -3,11 +3,15 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Loader2, FolderMinus, Trash2, X, Pencil, Image as ImageIcon, ChevronLeft } from "lucide-react";
+import { Loader2, FolderMinus, FolderPlus, Trash2, X, Pencil, Image as ImageIcon, ChevronLeft, ChevronDown, Images, ImageOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/input";
 import { AlbumFormDialog } from "@/components/album-form-dialog";
 import { EmptyState } from "@/components/image-grid";
 import { VisibilityBadge } from "@/components/image-actions";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { shortDate } from "@/lib/utils";
 import type { ImageDTO } from "@/server/image.service";
 
 type AlbumInfo = {
@@ -17,17 +21,20 @@ type AlbumInfo = {
   visibility: string;
   coverImageId: string | null;
   imageCount: number;
+  ownerName?: string;
 };
 
-// 相册详情（拥有者）：批量移出相册/设为封面/删除 + 编辑相册
+// 相册详情（拥有者）：批量移出相册/设为封面/进入或移出画廊/改可见性/移动相册/删除 + 编辑相册
 export function AlbumDetailClient({
   album: initialAlbum,
   initialItems,
   initialCursor,
+  showUploader,
 }: {
   album: AlbumInfo;
   initialItems: ImageDTO[];
   initialCursor: string | null;
+  showUploader?: boolean;
 }) {
   const [album, setAlbum] = useState(initialAlbum);
   const [items, setItems] = useState<ImageDTO[]>(initialItems);
@@ -36,6 +43,10 @@ export function AlbumDetailClient({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batching, setBatching] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  // 移动相册弹窗：目标相册列表懒加载（排除当前相册）
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [albums, setAlbums] = useState<{ id: string; name: string }[]>([]);
+  const [targetAlbum, setTargetAlbum] = useState("");
 
   const load = useCallback(
     async (reset: boolean) => {
@@ -94,6 +105,30 @@ export function AlbumDetailClient({
     await runBatch("album", { albumId: null });
   }
 
+  // 进入/移出公共画廊（进入 = 设为公开，审核通过后进画廊）
+  async function setGallery(toPublic: boolean) {
+    await runBatch("visibility", { visibility: toPublic ? "PUBLIC" : "PRIVATE" });
+  }
+
+  // 打开移动相册弹窗时拉取相册列表（排除当前相册）
+  async function openMove() {
+    setTargetAlbum("");
+    setMoveOpen(true);
+    try {
+      const res = await fetch("/api/albums");
+      const json = await res.json();
+      if (json.ok) setAlbums((json.data as { id: string; name: string }[]).filter((a) => a.id !== album.id));
+    } catch {
+      // 打开失败也能手动取消
+    }
+  }
+
+  async function moveToAlbum() {
+    if (!targetAlbum) return;
+    await runBatch("album", { albumId: targetAlbum });
+    setMoveOpen(false);
+  }
+
   async function removeOne(imgId: string) {
     setBatching(true);
     try {
@@ -143,13 +178,16 @@ export function AlbumDetailClient({
       {/* 相册头部：信息 + 编辑 */}
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <Link href="/albums" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-            <ChevronLeft className="h-3.5 w-3.5" /> 返回相册管理
-          </Link>
-          <h1 className="mt-1 flex items-center gap-2 text-xl font-bold">
+          <Button asChild variant="outline" className="mb-2">
+            <Link href="/albums">
+              <ChevronLeft className="h-4 w-4" /> 返回相册管理
+            </Link>
+          </Button>
+          <h1 className="flex items-center gap-2 text-xl font-bold">
             {album.name}
             <VisibilityBadge visibility={album.visibility} />
           </h1>
+          {album.ownerName && <p className="mt-0.5 text-xs text-muted-foreground">来自用户：{album.ownerName}</p>}
           {album.description && <p className="mt-1 text-sm text-muted-foreground">{album.description}</p>}
           <p className="mt-0.5 text-xs text-muted-foreground">共 {album.imageCount} 张图片</p>
         </div>
@@ -172,11 +210,53 @@ export function AlbumDetailClient({
               />
               全选
             </label>
+            <Button size="sm" variant="outline" className="text-sm" disabled={selected.size === 0} onClick={() => setSelected(new Set())} title="清空当前选中">
+              取消全选
+            </Button>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm text-muted-foreground">已选 {selected.size} 张</span>
               <Button size="sm" variant="outline" disabled={batching || selected.size === 0} onClick={batchRemove}>
                 <FolderMinus className="h-4 w-4" /> 移出相册
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={batching || selected.size === 0}
+                onClick={() => setGallery(true)}
+                title="把选中图片设为公开（审核通过后进入公共画廊）"
+              >
+                <Images className="h-4 w-4" /> 进入画廊
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={batching || selected.size === 0}
+                onClick={() => setGallery(false)}
+                title="把选中图片设为私有，从公共画廊移出"
+              >
+                <ImageOff className="h-4 w-4" /> 移出画廊
+              </Button>
+              <Button size="sm" variant="outline" disabled={batching || selected.size === 0} onClick={openMove}>
+                <FolderPlus className="h-4 w-4" /> 移动相册
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" disabled={batching || selected.size === 0}>
+                    设置可见性 <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onClick={() => runBatch("visibility", { visibility: "PUBLIC" })}>
+                    公开（所有人可见）
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => runBatch("visibility", { visibility: "UNLISTED" })}>
+                    友链（登录任意账户即可看）
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => runBatch("visibility", { visibility: "PRIVATE" })}>
+                    私有（仅自己 · 不提供外链）
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button size="sm" variant="outline" disabled={batching || selected.size !== 1} onClick={() => setCover([...selected][0])}>
                 <ImageIcon className="h-4 w-4" /> 设为封面
               </Button>
@@ -203,7 +283,12 @@ export function AlbumDetailClient({
                   className="aspect-square w-full cursor-pointer bg-muted object-cover"
                   onClick={() => toggle(img.id)}
                 />
-                <label className="absolute left-2 top-2 cursor-pointer">
+                {/* 勾选按钮：未选中任何图片时 hover 才显示；本卡片已选中或页面有选中时常驻 */}
+                <label
+                  className={`absolute left-2 top-2 cursor-pointer transition-opacity ${
+                    selected.has(img.id) || selected.size > 0 ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                  }`}
+                >
                   <input type="checkbox" className="h-4 w-4 accent-current" checked={selected.has(img.id)} onChange={() => toggle(img.id)} />
                 </label>
                 {img.id === coverId && (
@@ -242,9 +327,15 @@ export function AlbumDetailClient({
                     <FolderMinus className="h-3.5 w-3.5" />
                   </button>
                 </div>
-                <p className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent p-1.5 text-xs text-white opacity-0 group-hover:opacity-100">
-                  {img.filename}
-                </p>
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-1.5 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100">
+                  <p className="truncate">{img.filename}</p>
+                  {/* 上传者与时间：管理员查看他人相册（如「日常记录」）时显示图片来源 */}
+                  {showUploader && (
+                    <p className="truncate text-[0.65rem] text-white/80">
+                      上传者 {img.ownerName ?? "未知"} · {shortDate(img.createdAt)}
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -258,6 +349,33 @@ export function AlbumDetailClient({
           )}
         </>
       )}
+
+      {/* 移动相册弹窗：把选中图片移到另一个相册 */}
+      <Dialog open={moveOpen} onOpenChange={setMoveOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>移动到相册</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Select value={targetAlbum} onChange={(e) => setTargetAlbum(e.target.value)}>
+              <option value="">选择相册…</option>
+              {albums.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </Select>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setMoveOpen(false)}>
+                取消
+              </Button>
+              <Button disabled={batching || !targetAlbum} onClick={moveToAlbum}>
+                {batching ? <Loader2 className="animate-spin" /> : null} 确定
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AlbumFormDialog
         open={editOpen}

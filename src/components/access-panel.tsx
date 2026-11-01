@@ -51,7 +51,7 @@ export function AccessPanel() {
     <Card>
       <CardHeader>
         <CardTitle className="text-base">图片访问</CardTitle>
-        <CardDescription>其他用户申请浏览你的图片时在这里审批；同意后 TA 可浏览你全部已发布的图片（含私密）。</CardDescription>
+        <CardDescription>其他用户申请浏览你的图片时在这里审批；同意后 TA 可浏览你全部已发布的图片（含私密），可随时撤销授权。</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
         {/* 待我审批 */}
@@ -88,11 +88,6 @@ export function AccessPanel() {
                   <p className="text-xs text-muted-foreground">{formatDate(r.createdAt)} 申请</p>
                 </div>
                 <StatusBadge status={r.status} />
-                {r.status === "APPROVED" && (
-                  <Button size="sm" variant="outline" disabled={busyId === r.id} onClick={() => respond(r.id, "revoke")}>
-                    <Undo2 className="h-3.5 w-3.5" /> 撤销
-                  </Button>
-                )}
               </div>
             ))
           )}
@@ -112,6 +107,19 @@ export function AccessPanel() {
                   </p>
                 </div>
                 <StatusBadge status={r.status} />
+                {/* 我授权过的人可以随时撤销：撤销后 TA 无法再浏览我的图片 */}
+                {r.status === "APPROVED" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busyId === r.id}
+                    onClick={() => {
+                      if (confirm(`撤销后 ${r.user.name} 将无法再浏览你的图片，确定撤销？`)) respond(r.id, "revoke");
+                    }}
+                  >
+                    <Undo2 className="h-3.5 w-3.5" /> 撤销授权
+                  </Button>
+                )}
               </div>
             ))}
           </section>

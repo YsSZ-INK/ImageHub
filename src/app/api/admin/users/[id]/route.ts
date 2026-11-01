@@ -6,7 +6,7 @@ import { publicUser } from "@/server/user.service";
 
 export const runtime = "nodejs";
 
-// 更新用户：封禁/角色/配额（管理员）
+// 更新用户：封禁/角色/配额/重置密码（管理员；超级管理员受保护）
 export const PATCH = handle(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
   assertSameOrigin(req);
   const viewer = await requireApiUser();

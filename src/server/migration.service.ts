@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { getStorageFor, r2SlotIndex } from "@/lib/storage";
+import { invalidateImageView } from "@/server/image.service";
 import { AppError } from "@/lib/api";
 import { getSettings } from "@/lib/settings";
 import { testR2Connection } from "@/lib/storage/r2";
@@ -106,6 +107,7 @@ async function runMigration(from: MigrationMarker, target: MigrationMarker, ids?
         }
         // 记录更新成功后才删除源文件，任何一步失败该图片留在原位置可重试
         await prisma.image.update({ where: { id: img.id }, data: { storage: target } });
+        await invalidateImageView(img.id); // 存储位置变了，直链缓存必须失效
         await src.delete(img.storageKey);
         if (img.thumbKey) await src.delete(img.thumbKey);
       } catch (err) {

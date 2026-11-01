@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
+import { logActivity } from "@/server/audit.service";
 import type { Viewer } from "@/server/image.service";
 
 /**
@@ -78,6 +79,7 @@ export async function requestAccess(viewer: Viewer, targetId: string) {
     return { status: updated.status };
   }
   await prisma.imageAccessRequest.create({ data: { requesterId: viewer.id, ownerId: targetId } });
+  await logActivity(viewer.id, "access", `向 ${target.name} 申请查看图片`);
   return { status: "PENDING" };
 }
 
@@ -116,9 +118,12 @@ export async function respondAccess(viewer: Viewer, requestId: string, action: "
   const req = await prisma.imageAccessRequest.findUnique({ where: { id: requestId } });
   if (!req) throw new AppError("申请不存在", 404);
   if (req.ownerId !== viewer.id) throw new AppError("无权处理该申请", 403);
+  const other = await prisma.user.findUnique({ where: { id: req.requesterId }, select: { name: true } });
+  const who = other?.name ?? "对方";
   if (action === "revoke") {
     if (req.status !== "APPROVED") throw new AppError("仅已授权的记录可撤销", 400);
     await prisma.imageAccessRequest.delete({ where: { id: requestId } });
+    await logActivity(viewer.id, "access", `撤销了 ${who} 的浏览权限`);
     return { status: "REVOKED" };
   }
   if (req.status !== "PENDING") throw new AppError("该申请已处理", 400);
@@ -126,5 +131,6 @@ export async function respondAccess(viewer: Viewer, requestId: string, action: "
     where: { id: requestId },
     data: { status: action === "approve" ? "APPROVED" : "REJECTED", respondedAt: new Date() },
   });
+  await logActivity(viewer.id, "access", action === "approve" ? `同意了 ${who} 的查看申请` : `拒绝了 ${who} 的查看申请`);
   return { status: updated.status };
 }

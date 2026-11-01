@@ -30,7 +30,7 @@ export const GET = handle(async (req: Request) => {
   return ok(await listPosts(viewer, cursor, 10, range));
 });
 
-// 发布动态：文字 + 1~9 张本人的图片（图片转公开并归入默认相册「日常记录」）
+// 发布动态：文字 + 1~9 张本人的图片（图片随发布立即公开，无需审核）
 export const POST = handle(async (req: Request) => {
   assertSameOrigin(req);
   const user = await requireApiUser();

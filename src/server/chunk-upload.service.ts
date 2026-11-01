@@ -6,10 +6,11 @@ import path from "path";
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
+import { logActivity } from "@/server/audit.service";
 import { storageRoot } from "@/lib/storage/local";
 import { processAndStoreImage, processAndStoreVideoFile, detectImageMime, detectVideoMime } from "@/lib/image";
 import { localUsageOf } from "@/server/storage-stats";
-import { toDTO, type ImageDTO } from "./image.service";
+import { toDTO, ensureMyAlbum, type ImageDTO } from "./image.service";
 import type { User } from "@prisma/client";
 
 // 与前端切片大小保持一致
@@ -166,15 +167,15 @@ export async function completeChunkUpload(user: User, id: string): Promise<Image
   const dup = await prisma.image.findFirst({ where: { userId: user.id, sha256, deletedAt: null } });
   if (dup) {
     await cleanupSession(id);
-    if (s.albumId && dup.albumId !== s.albumId) {
-      const updated = await prisma.image.update({
-        where: { id: dup.id },
-        data: { albumId: s.albumId },
-        include: { user: { select: { name: true } } },
-      });
-      return toDTO(updated);
-    }
-    return toDTO(dup);
+    if (dup.albumId) return toDTO(dup);
+    // 记录尚未归属任何相册 → 挂到本次指定的相册（未指定则归入「我的相册」）
+    const albumId = s.albumId ?? (await ensureMyAlbum(user.id)).id;
+    const updated = await prisma.image.update({
+      where: { id: dup.id },
+      data: { albumId },
+      include: { user: { select: { name: true } } },
+    });
+    return toDTO(updated);
   }
 
   // 魔数判定（读合并文件头 64 字节）：图片全量走处理流水线，视频流式直传存储
@@ -197,6 +198,8 @@ export async function completeChunkUpload(user: User, id: string): Promise<Image
     throw new AppError("不支持的文件格式（仅允许 jpg/png/webp/gif/avif 与 mp4/webm/mov/mkv）", 415);
   }
 
+  // 未指定相册 → 归入默认「我的相册」
+  const albumId = s.albumId ?? (await ensureMyAlbum(user.id)).id;
   const img = await prisma.image.create({
     data: {
       userId: user.id,
@@ -210,12 +213,15 @@ export async function completeChunkUpload(user: User, id: string): Promise<Image
       height: processed.height,
       sha256: processed.sha256,
       blurhash: processed.blurhash,
-      albumId: s.albumId,
+      albumId,
+      // 默认私有：不进公共画廊，用户在「我的图片」勾选后才公开（管理员上传免审核直接发布）
+      visibility: "PRIVATE",
       status: user.role === "ADMIN" ? "PUBLISHED" : "PENDING",
     },
     include: { user: { select: { name: true } } },
   });
 
   await cleanupSession(id);
+  await logActivity(user.id, "upload", "上传了 1 张图片");
   return toDTO(img);
 }

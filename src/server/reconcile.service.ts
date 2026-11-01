@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { getStorageFor, type Storage } from "@/lib/storage";
+import { invalidateImageView } from "@/server/image.service";
 
 export type ReconcileResult = {
   checked: number;
@@ -47,5 +48,6 @@ export async function purgeMissingR2(ids: string[]): Promise<number> {
   const del = await prisma.image.deleteMany({
     where: { id: { in: ids }, storage: { startsWith: "r2:" } },
   });
+  await invalidateImageView(...ids);
   return del.count;
 }

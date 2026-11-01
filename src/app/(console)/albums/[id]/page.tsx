@@ -28,7 +28,10 @@ export default async function AlbumPage({ params }: { params: Promise<{ id: stri
           visibility: album.visibility,
           coverImageId: album.coverImageId,
           imageCount: album.imageCount,
+          // 管理员查看他人相册时显示归属用户
+          ...(album.userId !== viewer.id ? { ownerName: album.user.name } : {}),
         }}
+        showUploader={album.userId !== viewer.id}
         initialItems={items}
         initialCursor={nextCursor}
       />

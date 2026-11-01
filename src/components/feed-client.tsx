@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, ImagePlus, Send, Trash2, ChevronDown, Play, CalendarDays } from "lucide-react";
+import { Loader2, ImagePlus, Send, Trash2, ChevronDown, Play, CalendarDays, MessageCircle, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
@@ -22,6 +22,18 @@ type FeedPost = {
   author: { id: string; name: string; avatarUrl: string | null };
   images: FeedImage[];
   canDelete: boolean;
+  commentCount: number;
+};
+
+type FeedComment = {
+  id: string;
+  content: string;
+  createdAt: string;
+  user: { id: string; name: string; avatarUrl: string | null };
+  canDelete: boolean;
+  // 回复：parentId 指向所属顶层评论；replyTo 为被回复人（展示「回复 @某人」）
+  parentId: string | null;
+  replyTo: { id: string; name: string } | null;
 };
 
 const MAX_POST_IMAGES = 9;
@@ -104,7 +116,7 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
   }, [load, from, to]);
 
   async function removePost(p: FeedPost) {
-    if (!confirm(`删除这条动态？图片仍会保留在相册中。`)) return;
+    if (!confirm(`删除这条动态？动态里的图片将一并移入回收站。`)) return;
     setDeleting(p.id);
     try {
       const res = await fetch(`/api/posts/${p.id}`, { method: "DELETE" });
@@ -196,7 +208,13 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
 // ============ 发布器：文字 + 选择本地图片/视频（逐张上传后创建动态） ============
 type Picked = { file: File; url: string; isVideo: boolean };
 
-function Composer({ me, onPublished }: { me: { name: string; avatarUrl: string | null }; onPublished: () => void }) {
+function Composer({
+  me,
+  onPublished,
+}: {
+  me: { name: string; avatarUrl: string | null };
+  onPublished: () => void;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [caption, setCaption] = useState("");
   const [picked, setPicked] = useState<Picked[]>([]);
@@ -225,7 +243,7 @@ function Composer({ me, onPublished }: { me: { name: string; avatarUrl: string |
   }
 
   async function publish() {
-    if (picked.length === 0) return;
+    if (picked.length === 0 && !caption.trim()) return;
     setPublishing(true);
     try {
       const ids: string[] = [];
@@ -267,7 +285,7 @@ function Composer({ me, onPublished }: { me: { name: string; avatarUrl: string |
         <AvatarFallbackIcon name={me.name} url={me.avatarUrl} size={40} />
         <div className="min-w-0 flex-1 space-y-3">
           <Textarea
-            placeholder="分享一组照片…"
+            placeholder="分享照片或写点什么…"
             value={caption}
             maxLength={1000}
             rows={2}
@@ -303,27 +321,29 @@ function Composer({ me, onPublished }: { me: { name: string; avatarUrl: string |
             </div>
           )}
           <div className="flex items-center justify-between">
-            <input
-              ref={inputRef}
-              type="file"
-              accept="image/jpeg,.jpg,.jpeg,image/png,image/webp,image/gif,image/avif,video/mp4,.mp4,.m4v,video/webm,.webm,video/quicktime,.mov,.mkv,video/x-matroska"
-              multiple
-              hidden
-              onChange={(e) => {
-                if (e.target.files) addFiles(e.target.files);
-                e.target.value = "";
-              }}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={publishing || picked.length >= MAX_POST_IMAGES}
-              onClick={() => inputRef.current?.click()}
-            >
-              <ImagePlus className="h-4 w-4" />
-              选择图片/视频{picked.length > 0 ? ` (${picked.length}/${MAX_POST_IMAGES})` : ""}
-            </Button>
-            <Button size="sm" disabled={publishing || picked.length === 0} onClick={publish}>
+            <div className="flex items-center gap-2">
+              <input
+                ref={inputRef}
+                type="file"
+                accept="image/jpeg,.jpg,.jpeg,image/png,image/webp,image/gif,image/avif,video/mp4,.mp4,.m4v,video/webm,.webm,video/quicktime,.mov,.mkv,video/x-matroska"
+                multiple
+                hidden
+                onChange={(e) => {
+                  if (e.target.files) addFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={publishing || picked.length >= MAX_POST_IMAGES}
+                onClick={() => inputRef.current?.click()}
+              >
+                <ImagePlus className="h-4 w-4" />
+                选择图片/视频{picked.length > 0 ? ` (${picked.length}/${MAX_POST_IMAGES})` : ""}
+              </Button>
+            </div>
+            <Button size="sm" disabled={publishing || (picked.length === 0 && !caption.trim())} onClick={publish}>
               {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {publishing ? progress || "发布中…" : "发布"}
             </Button>
@@ -347,6 +367,7 @@ function PostCard({
   onPreview: (v: { images: FeedImage[]; index: number }) => void;
 }) {
   const n = post.images.length;
+  const [commentCount, setCommentCount] = useState(post.commentCount);
   return (
     <article className="rounded-xl border border-foreground/10 bg-background/55 p-4 backdrop-blur-md">
       <div className="flex gap-3">
@@ -369,7 +390,7 @@ function PostCard({
           </div>
           {post.caption && <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed">{post.caption}</p>}
 
-          {n === 1 ? (
+          {n === 0 ? null : n === 1 ? (
             post.images[0].kind === "video" ? (
               <div className="relative mt-2 inline-block cursor-pointer" onClick={() => onPreview({ images: post.images, index: 0 })}>
                 <video
@@ -429,11 +450,216 @@ function PostCard({
             </div>
           )}
 
-          <p className="mt-2 text-xs text-muted-foreground" suppressHydrationWarning>
-            {formatPostDate(post.createdAt)}
-          </p>
+          <div className="mt-2 flex items-center gap-3">
+            <p className="text-xs text-muted-foreground" suppressHydrationWarning>
+              {formatPostDate(post.createdAt)}
+            </p>
+            <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+              <MessageCircle className="h-3.5 w-3.5" />
+              {commentCount > 0 ? `${commentCount} 条评论` : "评论"}
+            </span>
+          </div>
+          {/* 评论区常驻展开：默认显示 3 条，更多走「加载更多评论」 */}
+          <PostComments post={post} onChange={setCommentCount} />
         </div>
       </div>
     </article>
+  );
+}
+
+// ============ 评论区：顶层评论默认展开 3 条，回复缩进挂在其下，可回复任意评论 ============
+const COMMENTS_VISIBLE = 3;
+
+function PostComments({ post, onChange }: { post: FeedPost; onChange: (n: number) => void }) {
+  const [comments, setComments] = useState<FeedComment[] | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  // 回复目标：点「回复」后锁定，输入框显示「回复 @某人」，可取消
+  const [replyTarget, setReplyTarget] = useState<FeedComment | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/posts/${post.id}/comments`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (!alive) return;
+        if (json.ok) {
+          setComments(json.data);
+          onChange(json.data.length);
+        } else toast.error(json.error);
+      })
+      .catch(() => alive && toast.error("评论加载失败"));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post.id]);
+
+  async function submit() {
+    const text = draft.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/posts/${post.id}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: text, ...(replyTarget ? { parentId: replyTarget.id } : {}) }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setComments((prev) => [...(prev ?? []), json.data]);
+        setDraft("");
+        setReplyTarget(null);
+        onChange((comments?.length ?? 0) + 1);
+      } else toast.error(json.error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(c: FeedComment) {
+    if (!confirm(c.parentId === null ? "删除这条评论？其下回复将一并删除。" : "删除这条回复？")) return;
+    setRemoving(c.id);
+    try {
+      const res = await fetch(`/api/comments/${c.id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.ok) {
+        // 顶层评论删除时，其下回复随服务端级联删除，本地一并移除
+        setComments((prev) => (prev ?? []).filter((x) => x.id !== c.id && x.parentId !== c.id));
+        setReplyTarget((t) => (t && (t.id === c.id || t.parentId === c.id) ? null : t));
+        const remain = (comments ?? []).filter((x) => x.id !== c.id && x.parentId !== c.id).length;
+        onChange(Math.max(0, remain));
+      } else toast.error(json.error);
+    } finally {
+      setRemoving(null);
+    }
+  }
+
+  if (comments === null) {
+    return (
+      <div className="mt-3 flex justify-center rounded-lg bg-muted/40 p-3">
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // 分组：顶层评论 + 挂在其下的回复（一层线程）
+  const tops = comments.filter((c) => !c.parentId);
+  const repliesOf = (id: string) => comments.filter((c) => c.parentId === id);
+  const visibleTops = showAll ? tops : tops.slice(0, COMMENTS_VISIBLE);
+
+  const renderComment = (c: FeedComment, isReply: boolean) => (
+    <li key={c.id} className="flex gap-2">
+      <AvatarFallbackIcon name={c.user.name} url={c.user.avatarUrl} size={isReply ? 24 : 28} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="truncate text-xs font-medium">{c.user.name}</span>
+          <span className="shrink-0 text-[0.65rem] text-muted-foreground" suppressHydrationWarning>
+            {formatPostDate(c.createdAt)}
+          </span>
+          <span className="ml-auto flex shrink-0 items-center gap-2">
+            {/* 回复按钮：任何评论/回复都可回复 */}
+            <button
+              type="button"
+              className="text-[0.65rem] text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setReplyTarget(c)}
+            >
+              回复
+            </button>
+            {c.canDelete && (
+              <button
+                type="button"
+                aria-label="删除评论"
+                title={c.user.id === post.author.id ? "删除评论" : "删除评论（管理员）"}
+                disabled={removing === c.id}
+                className="text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+                onClick={() => remove(c)}
+              >
+                {removing === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+              </button>
+            )}
+          </span>
+        </div>
+        <p className="mt-0.5 whitespace-pre-wrap break-words text-sm leading-relaxed">
+          {c.replyTo && (
+            <span className="mr-1 text-xs text-muted-foreground">
+              回复 <span className="font-medium text-foreground/80">@{c.replyTo.name}</span>
+            </span>
+          )}
+          {c.content}
+        </p>
+      </div>
+    </li>
+  );
+
+  return (
+    <div className="mt-3 space-y-2 rounded-lg bg-muted/40 p-3">
+      {comments.length === 0 ? (
+        <p className="py-1 text-center text-xs text-muted-foreground">还没有评论</p>
+      ) : (
+        <>
+          <ul className="space-y-2">
+            {visibleTops.map((top) => {
+              const replies = repliesOf(top.id);
+              return (
+                <li key={top.id} className="space-y-2">
+                  {renderComment(top, false)}
+                  {/* 回复缩进显示在顶层评论之下 */}
+                  {replies.length > 0 && <ul className="ml-9 space-y-2 border-l border-foreground/10 pl-3">{replies.map((r) => renderComment(r, true))}</ul>}
+                </li>
+              );
+            })}
+          </ul>
+          {tops.length > COMMENTS_VISIBLE && !showAll && (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setShowAll(true)}
+            >
+              加载更多评论（还有 {tops.length - COMMENTS_VISIBLE} 条）
+            </button>
+          )}
+        </>
+      )}
+      {/* 回复状态条 + 输入框：锁定回复对象时显示「回复 @某人」，可取消 */}
+      <div className="pt-1">
+        {replyTarget && (
+          <div className="mb-1.5 flex items-center gap-1 text-xs text-muted-foreground">
+            <span>
+              回复 <span className="font-medium text-foreground/80">@{replyTarget.user.name}</span>
+            </span>
+            <button
+              type="button"
+              aria-label="取消回复"
+              title="取消回复"
+              className="transition-colors hover:text-foreground"
+              onClick={() => setReplyTarget(null)}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        )}
+        <div className="flex gap-2">
+          <Input
+            value={draft}
+            maxLength={500}
+            placeholder={replyTarget ? `回复 @${replyTarget.user.name}…` : "写评论…"}
+            className="h-9 bg-background text-sm"
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+          <Button size="sm" className="h-9" disabled={busy || !draft.trim()} onClick={submit}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }

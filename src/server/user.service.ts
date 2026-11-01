@@ -6,6 +6,7 @@ import { getMailer } from "@/lib/mailer";
 import { getStorageFor, getLocalStorage } from "@/lib/storage";
 import { processAndStoreAvatar } from "@/lib/image";
 import { localUsageOf } from "@/server/storage-stats";
+import { invalidateImageView } from "@/server/image.service";
 import type { User } from "@prisma/client";
 import type { z } from "zod";
 import type {
@@ -144,6 +145,7 @@ export async function deleteAccount(user: User) {
     byDriver.set(i.storage, keys);
   }
   await prisma.user.delete({ where: { id: user.id } }); // 级联删除 Image/Album/Token
+  await invalidateImageView(...images.map((i) => i.id)).catch(() => {}); // 失效直链缓存（尽力而为）
   // 存储删除放事务外，尽力而为
   for (const [driver, keys] of byDriver) {
     const storage = await getStorageFor(driver).catch(() => null);

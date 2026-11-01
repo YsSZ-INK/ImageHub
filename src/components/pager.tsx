@@ -8,11 +8,13 @@ import { Input } from "@/components/ui/input";
 export function Pager({
   page,
   hasNext,
+  totalPages,
   disabled,
   onGo,
 }: {
   page: number;
   hasNext: boolean;
+  totalPages?: number | null;
   disabled?: boolean;
   onGo: (target: number) => void;
 }) {
@@ -36,16 +38,31 @@ export function Pager({
       >
         <span>第</span>
         <Input
-          type="number"
-          min={1}
+          type="text"
+          inputMode="numeric"
           aria-label="页码"
           className="h-8 w-14 text-center"
           placeholder={String(page)}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          maxLength={4}
+          onChange={(e) => setInput(e.target.value.replace(/\D/g, ""))}
+          onFocus={(e) => {
+            // 点入时预填当前页码并把光标置于数字后，可直接续输或退格修改
+            const el = e.currentTarget;
+            setInput(String(page));
+            requestAnimationFrame(() => {
+              const len = el.value.length;
+              try {
+                el.setSelectionRange(len, len);
+              } catch {
+                // 部分浏览器不支持 selection，忽略
+              }
+            });
+          }}
         />
         <span>页</span>
       </form>
+      {totalPages ? <span className="whitespace-nowrap text-muted-foreground">共 {totalPages} 页</span> : null}
       <Button variant="outline" size="sm" disabled={disabled || !hasNext} onClick={() => onGo(page + 1)}>
         下一页
       </Button>

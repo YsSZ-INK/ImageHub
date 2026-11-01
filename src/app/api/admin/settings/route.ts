@@ -2,6 +2,7 @@ import { handle, assertSameOrigin, ok, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
 import { adminSettingsSchema } from "@/lib/validation";
 import { getSettings, saveSettings, sanitizeSettings } from "@/lib/settings";
+import { logActivity } from "@/server/audit.service";
 
 export const runtime = "nodejs";
 
@@ -39,5 +40,6 @@ export const PUT = handle(async (req: Request) => {
     }
   }
   await saveSettings(input);
+  await logActivity(viewer.id, "settings", "更新了站点设置");
   return ok({ message: "设置已保存" });
 });

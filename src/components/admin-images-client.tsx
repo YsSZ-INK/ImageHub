@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Check, Trash2 } from "lucide-react";
+import { Loader2, Check, Trash2, CheckCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Pager } from "@/components/pager";
 import { formatBytes, shortDate } from "@/lib/utils";
@@ -27,6 +27,7 @@ export function AdminImagesClient() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
+  const [approvingAll, setApprovingAll] = useState(false);
 
   const load = useCallback(async (p = 1) => {
     setLoading(true);
@@ -62,6 +63,22 @@ export function AdminImagesClient() {
     }
   }
 
+  async function approveAll() {
+    if (total === 0) return;
+    if (!confirm(`确定把全部 ${total} 张待审核图片一键通过？`)) return;
+    setApprovingAll(true);
+    try {
+      const res = await fetch("/api/admin/images/approve-all", { method: "POST" });
+      const json = await res.json();
+      if (json.ok) {
+        toast.success(`已通过 ${json.data.affected} 张，图片进入画廊`);
+        load(page);
+      } else toast.error(json.error);
+    } finally {
+      setApprovingAll(false);
+    }
+  }
+
   async function purge(id: string) {
     if (!confirm("彻底删除该图片？不可恢复！")) return;
     setActing(id);
@@ -79,9 +96,14 @@ export function AdminImagesClient() {
 
   return (
     <div className="flex min-h-[calc(100vh-6rem)] flex-col space-y-4">
-      <div className="flex items-baseline justify-between">
-        <h1 className="text-xl font-bold">图片审核</h1>
-        {total > 0 && <span className="text-sm text-muted-foreground">待审核 {total} 张</span>}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-xl font-bold">图片审核</h1>
+          {total > 0 && <span className="text-sm text-muted-foreground">待审核 {total} 张</span>}
+        </div>
+        <Button size="sm" disabled={total === 0 || approvingAll || loading} onClick={approveAll}>
+          {approvingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="h-4 w-4" />} 全部通过
+        </Button>
       </div>
 
       {loading && items.length === 0 ? (

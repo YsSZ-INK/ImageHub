@@ -2,8 +2,9 @@ import { requireUser } from "@/lib/session";
 import { listUserDirectory } from "@/server/access.service";
 import { listImages } from "@/server/image.service";
 import { ExchangeView } from "@/components/image-exchange";
+import { AccessPanel } from "@/components/access-panel";
 
-// 交换图片：已授权用户页内切换浏览其图片；未授权的在下方目录发起申请
+// 交换图片：已授权用户页内切换浏览其图片；未授权的在下方目录发起申请；底部「图片访问」面板审批/撤销授权
 export default async function UsersDirectoryPage() {
   const user = await requireUser();
   const users = await listUserDirectory(user);
@@ -14,11 +15,16 @@ export default async function UsersDirectoryPage() {
     : { items: [], nextCursor: null };
 
   return (
-    <ExchangeView
-      users={users}
-      initialUser={first ?? null}
-      initialItems={firstPage.items}
-      initialCursor={firstPage.nextCursor}
-    />
+    <div className="space-y-6">
+      <ExchangeView
+        users={users}
+        initialUser={first ?? null}
+        initialItems={firstPage.items}
+        initialCursor={firstPage.nextCursor}
+      />
+      <div id="access-panel">
+        <AccessPanel />
+      </div>
+    </div>
   );
 }

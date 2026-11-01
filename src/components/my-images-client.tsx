@@ -2,27 +2,48 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown, ZoomIn, Play, RotateCcw } from "lucide-react";
+import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown, ZoomIn, Play, RotateCcw, Images, ImageOff, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { ImageGrid, EmptyState } from "@/components/image-grid";
 import { Lightbox } from "@/components/lightbox";
 import { Pager } from "@/components/pager";
 import { UploadDropzone } from "@/components/upload-dropzone";
-import { VisibilityBadge } from "@/components/image-actions";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useCursorPager } from "@/lib/use-cursor-pager";
 import { formatBytes } from "@/lib/utils";
 import { markerLabel, markerBadgeClass } from "@/lib/markers";
+import type { ImageDTO } from "@/server/image.service";
+
+// 复制文本到剪贴板（外链 / HTML / Markdown 共用）
+async function copyText(text: string, tip = "已复制") {
+  await navigator.clipboard.writeText(text);
+  toast.success(tip, { description: text });
+}
+
+// 外链弹窗里的一行：只读输入框 + 复制按钮
+function ShareField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs font-medium">{label}</p>
+      <div className="flex gap-2">
+        <Input readOnly value={value} className="text-xs" />
+        <Button variant="outline" size="sm" className="shrink-0" onClick={() => copyText(value)}>
+          <Copy className="h-4 w-4" /> 复制
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 // 我的图片：多选 + 批量操作（删除/移动相册/改可见性）+ 按存储位置筛选
 export function MyImagesClient({ albums, storages }: { albums: { id: string; name: string }[]; storages: { marker: string; label: string }[] }) {
   // 存储位置筛选：空 = 全部；切换后 useCursorPager 自动回第一页重新加载
   const [storage, setStorage] = useState("");
   // 游标分页：翻页/跳页逻辑统一在 hook 内
-  const { items, page, hasNext, loading, loadPage, gotoPage } = useCursorPager({
+  const { items, page, hasNext, loading, loadPage, gotoPage, totalPages } = useCursorPager({
     scope: "mine",
     ...(storage ? { storage } : {}),
   });
@@ -35,6 +56,8 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
   const [albumId, setAlbumId] = useState("");
   // 灯箱预览：当前页内索引
   const [preview, setPreview] = useState<number | null>(null);
+  // 外链分享弹窗：展示加载好的原图 + 各格式复制
+  const [shareFor, setShareFor] = useState<ImageDTO | null>(null);
 
   function toggle(id: string) {
     setSelected((s) => {
@@ -72,13 +95,6 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
     await runBatch("delete");
   }
 
-  // 复制图片外链（原图直链；PUBLIC/UNLISTED 免登录可访问）
-  async function copyLink(id: string) {
-    const url = `${window.location.origin}/api/images/${id}/raw`;
-    await navigator.clipboard.writeText(url);
-    toast.success("外链已复制", { description: url });
-  }
-
   // 重新审核：图片回到待审核队列，管理员通过前从画廊与公开外链中隐藏
   async function reReview(id: string) {
     if (!confirm("重新提交审核？审核通过前，该图片将从画廊与公开外链中隐藏。")) return;
@@ -88,6 +104,28 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
       toast.success("已提交重新审核");
       loadPage(page);
     } else toast.error(json.error);
+  }
+
+  // 跨页全选：拉取当前筛选下全部图片 id（含未加载页）
+  async function selectAll() {
+    try {
+      const sp = new URLSearchParams();
+      if (storage) sp.set("storage", storage);
+      const res = await fetch(`/api/images/ids${sp.size ? `?${sp}` : ""}`);
+      const json = await res.json();
+      if (json.ok) {
+        setSelected(new Set<string>(json.data.ids));
+        toast.success(`已选中全部 ${json.data.ids.length} 张（含未加载页）`);
+      } else toast.error(json.error);
+    } catch {
+      toast.error("网络错误，请稍后再试");
+    }
+  }
+
+  // 进入/移出公共画廊：改为选中后点按钮批量操作（进入 = 设为公开，审核通过后进画廊）
+  async function setGallery(toPublic: boolean) {
+    if (selected.size === 0) return;
+    await runBatch("visibility", { visibility: toPublic ? "PUBLIC" : "PRIVATE" });
   }
 
   return (
@@ -125,7 +163,8 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
           {/* 工具栏：多选 + 批量操作 + 上传按钮 */}
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
             <div className="flex flex-wrap items-center gap-2">
-              <label className="flex cursor-pointer items-center gap-2">
+              {/* 选中本页开关 + 已选计数合并为一个控件：勾选即选中本页，文字实时显示已选张数 */}
+              <label className="flex cursor-pointer items-center gap-2" title="勾选选中本页全部图片，取消勾选清除本页选中">
                 <input
                   type="checkbox"
                   checked={items.length > 0 && items.every((i) => selected.has(i.id))}
@@ -139,11 +178,36 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                     }
                   }}
                 />
-                全选本页
-              </label>
-              {/* 批量操作栏：常驻显示，未选中时禁用操作 */}
-              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm text-muted-foreground">已选 {selected.size} 张</span>
+              </label>
+              <Button size="sm" variant="outline" className="text-sm" disabled={batching} onClick={selectAll} title="选中当前筛选下的所有图片（含未加载页）">
+                全选
+              </Button>
+              <Button size="sm" variant="outline" className="text-sm" disabled={selected.size === 0} onClick={() => setSelected(new Set())} title="清空当前选中">
+                取消全选
+              </Button>
+              {/* 批量操作栏：常驻显示，未选中时禁用操作（已选计数见左侧勾选框） */}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-sm"
+                  disabled={batching || selected.size === 0}
+                  onClick={() => setGallery(true)}
+                  title="把选中图片设为公开（审核通过后进入公共画廊）"
+                >
+                  <Images className="h-4 w-4" /> 进入画廊
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-sm"
+                  disabled={batching || selected.size === 0}
+                  onClick={() => setGallery(false)}
+                  title="把选中图片设为私有，从公共画廊移出"
+                >
+                  <ImageOff className="h-4 w-4" /> 移出画廊
+                </Button>
                 <Button size="sm" variant="outline" className="text-sm" disabled={batching || selected.size === 0} onClick={() => setDialog("album")}>
                   <FolderPlus className="h-4 w-4" /> 移动相册
                 </Button>
@@ -158,7 +222,7 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                       公开（所有人可见）
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => runBatch("visibility", { visibility: "UNLISTED" })}>
-                      有链可见（拿到链接即可看）
+                      友链（登录任意账户即可看）
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => runBatch("visibility", { visibility: "PRIVATE" })}>
                       私有（仅自己 · 不提供外链）
@@ -235,14 +299,7 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                     onChange={() => toggle(img.id)}
                   />
                 </label>
-                <div className="absolute bottom-2 right-2 z-10 transition-opacity group-hover:opacity-0">
-                  {img.status === "PENDING" ? (
-                    <span className="rounded bg-amber-500/90 px-1.5 py-0.5 text-[10px] font-medium text-white">审核中</span>
-                  ) : (
-                    <VisibilityBadge visibility={img.visibility} className="bg-transparent text-black ring-0" />
-                  )}
-                </div>
-                {/* 顶部操作：重新审核（仅已发布）+ 复制外链 */}
+                {/* 顶部操作：重新审核（仅已发布；复制外链走图片下方「外链」按钮的弹窗） */}
                 <div className="absolute right-2 top-2 z-10 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
                   {img.status === "PUBLISHED" && (
                     <button
@@ -258,47 +315,91 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                       <RotateCcw className="h-3.5 w-3.5" />
                     </button>
                   )}
-                  <button
-                    type="button"
-                    aria-label="复制外链"
-                    title="复制外链"
-                    className="rounded-md bg-black/60 p-1.5 text-white transition-colors hover:bg-black/80"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      copyLink(img.id);
-                    }}
-                  >
-                    <Link2 className="h-3.5 w-3.5" />
-                  </button>
                 </div>
                 <p className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent p-1.5 text-xs text-white opacity-0 group-hover:opacity-100">
                   {img.filename}
                 </p>
                 </div>
-                {/* 链接条：每张图片常驻显示外链，点击复制完整地址 */}
-              <button
-                type="button"
-                title={`点击复制外链：/api/images/${img.id}/raw`}
-                className="flex w-full items-center gap-1.5 border-t bg-muted/50 px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  copyLink(img.id);
-                }}
-              >
-                <Link2 className="h-3 w-3 shrink-0" />
-                <span className="truncate">/api/images/{img.id}/raw</span>
-                <span className={`ml-auto shrink-0 rounded px-1 text-[0.625rem] font-medium ${markerBadgeClass(img.storage)}`}>
+                {/* 图片下方信息条：五格均分铺满图片宽度（外链 / 存储位置 / 画廊 / 可见性 / 大小），统一胶囊样式 */}
+              <div className="grid w-full grid-cols-5 gap-0.5 border-t bg-muted/50 px-1.5 py-1">
+                <Button
+                  variant="outline"
+                  className="inline-flex h-4 w-full items-center justify-center rounded px-0.5 text-[0.625rem] leading-none"
+                  title="外链分享：查看原图并复制链接 / 嵌入代码"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShareFor(img);
+                  }}
+                >
+                  <Link2 className="h-2.5 w-2.5" /> 外链
+                </Button>
+                <span
+                  className={`inline-flex h-4 w-full items-center justify-center truncate rounded px-0.5 text-[0.625rem] leading-none font-medium ${markerBadgeClass(img.storage)}`}
+                  title="存储位置"
+                >
                   {labelOf(img.storage)}
                 </span>
-                <span className="shrink-0 tabular-nums">{formatBytes(img.size)}</span>
-              </button>
+                {/* 画廊状态：已入画廊（公开且已过审）显示绿色，否则灰色 */}
+                {img.status === "PUBLISHED" && img.visibility === "PUBLIC" ? (
+                  <span
+                    className="inline-flex h-4 w-full items-center justify-center rounded bg-green-500/15 px-0.5 text-[0.625rem] leading-none font-medium text-green-600"
+                    title="已进入公共画廊"
+                  >
+                    画廊
+                  </span>
+                ) : (
+                  <span
+                    className="inline-flex h-4 w-full items-center justify-center rounded bg-muted px-0.5 text-[0.625rem] leading-none font-medium text-muted-foreground"
+                    title={img.status === "PENDING" ? "审核通过后才能进入公共画廊" : "未进入公共画廊（选中后点「进入画廊」）"}
+                  >
+                    未入
+                  </span>
+                )}
+                {/* 可见性（原图片右下角徽标移入信息条）：审核中优先显示，其余按可见性着色 */}
+                {img.status === "PENDING" ? (
+                  <span
+                    className="inline-flex h-4 w-full items-center justify-center rounded bg-amber-500/15 px-0.5 text-[0.625rem] leading-none font-medium text-amber-600"
+                    title="等待管理员审核"
+                  >
+                    审核中
+                  </span>
+                ) : img.visibility === "PUBLIC" ? (
+                  <span
+                    className="inline-flex h-4 w-full items-center justify-center rounded bg-blue-500/15 px-0.5 text-[0.625rem] leading-none font-medium text-blue-600"
+                    title="公开（所有人可见）"
+                  >
+                    公开
+                  </span>
+                ) : img.visibility === "UNLISTED" ? (
+                  <span
+                    className="inline-flex h-4 w-full items-center justify-center rounded bg-purple-500/15 px-0.5 text-[0.625rem] leading-none font-medium text-purple-600"
+                    title="友链（登录任意账户即可访问，不进入公共画廊）"
+                  >
+                    友链
+                  </span>
+                ) : (
+                  <span
+                    className="inline-flex h-4 w-full items-center justify-center rounded bg-orange-500/15 px-0.5 text-[0.625rem] leading-none font-medium text-orange-600"
+                    title="私有（仅自己可见）"
+                  >
+                    私有
+                  </span>
+                )}
+                {/* 文件大小：与其他格相同的方块胶囊样式 */}
+                <span
+                  className="inline-flex h-4 w-full items-center justify-center rounded bg-muted px-0.5 text-[0.625rem] leading-none tabular-nums text-muted-foreground"
+                  title="文件大小"
+                >
+                  {formatBytes(img.size)}
+                </span>
+              </div>
             </div>
           ))}
           </div>
 
-          {/* 翻页：贴底显示（支持输入页码跳转） */}
+          {/* 翻页：贴底显示（支持输入页码跳转，显示总页数） */}
           <div className="mt-auto">
-            <Pager page={page} hasNext={hasNext} disabled={loading} onGo={gotoPage} />
+            <Pager page={page} hasNext={hasNext} totalPages={totalPages} disabled={loading} onGo={gotoPage} />
           </div>
         </>
       )}
@@ -341,6 +442,40 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+      {/* 外链分享弹窗：加载好的原图 + 直接链接 / 嵌入 HTML / Markdown 一键复制 */}
+      {/* onOpenAutoFocus 阻止弹窗自动聚焦第一个输入框（否则直接链接一打开就带焦点高亮，像被选中） */}
+      <Dialog open={!!shareFor} onOpenChange={(o) => !o && setShareFor(null)}>
+        <DialogContent className="max-w-lg" onOpenAutoFocus={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle>外链分享</DialogTitle>
+          </DialogHeader>
+          {shareFor && (() => {
+            const abs = `${window.location.origin}/api/images/${shareFor.id}/raw`;
+            const hint =
+              shareFor.visibility === "PUBLIC" && shareFor.status === "PUBLISHED"
+                ? "该图片已公开：任何人拿到链接即可访问。"
+                : shareFor.visibility === "UNLISTED" && shareFor.status === "PUBLISHED"
+                  ? "该图片「友链」：登录任意账户后即可访问，未登录访客无法打开，不进入公共画廊。"
+                  : "该图片尚未公开（私有或审核中）：外链目前仅自己与管理员可访问，设为公开后对其他人生效。";
+            return (
+              <div className="space-y-4">
+                <div className="flex max-h-80 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/40">
+                  {shareFor.kind === "video" ? (
+                    <video src={shareFor.rawUrl} controls playsInline className="max-h-80 w-full bg-black/90" />
+                  ) : (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={shareFor.rawUrl} alt={shareFor.filename} className="max-h-80 w-full object-contain" />
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">{hint}</p>
+                <ShareField label="直接链接" value={abs} />
+                <ShareField label="嵌入 HTML" value={`<img src="${abs}" alt="${shareFor.filename}" />`} />
+                <ShareField label="Markdown" value={`![${shareFor.filename}](${abs})`} />
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
       {/* 灯箱放大查看（当前页内可左右切换，ESC 关闭） */}

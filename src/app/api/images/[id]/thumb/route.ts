@@ -1,21 +1,25 @@
 import { NextResponse } from "next/server";
 import { handle, AppError } from "@/lib/api";
 import { getCurrentUser } from "@/lib/session";
-import { getImageForView } from "@/server/image.service";
+import { getImageForView, getImageForPublicView, type PublicImageSnapshot } from "@/server/image.service";
 import { getStorageFor } from "@/lib/storage";
 import { getThumb } from "@/lib/thumb-cache";
 import sharp from "sharp";
 
 export const runtime = "nodejs";
 
-// 缩略图访问：PUBLIC / UNLISTED 免登录直链，PRIVATE 仅本人/管理员（权限校验防 IDOR）
+// 缩略图访问：PUBLIC 免登录直链（匿名走缓存快照免查库），UNLISTED（友链）登录任意账户可见，
+// PRIVATE 仅本人/管理员（权限校验防 IDOR）
 // 缩略图不作为对象存进存储桶：统一由原图现场生成 400px（?w=2560 为灯箱预览档），
 // 结果进本地两级缓存（内存 LRU + storage/.thumbs/ 磁盘），命中后零回源零生成；缓存一天自动清空重建
 // 视频没有缩略图：重定向到原文件，由前端 <video preload="metadata"> 展示首帧
 export const GET = handle(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const viewer = await getCurrentUser();
   const { id } = await params;
-  const img = await getImageForView(id, viewer);
+  // 匿名高频直链：公开图优先取缓存行快照（0 次查库）；未命中 / 非公开 / 登录用户走完整校验
+  let img: PublicImageSnapshot | null = null;
+  if (!viewer) img = await getImageForPublicView(id);
+  if (!img) img = await getImageForView(id, viewer);
   if (img.mimeType.startsWith("video/")) {
     return NextResponse.redirect(new URL(`/api/images/${id}/raw`, req.url), 307);
   }

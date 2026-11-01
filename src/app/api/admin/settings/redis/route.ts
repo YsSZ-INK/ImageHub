@@ -2,6 +2,7 @@ import { handle, assertSameOrigin, ok, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
 import { redisStatus, testRedisUrl, getRedis } from "@/lib/redis";
 import { getSettings, saveSettings } from "@/lib/settings";
+import { logActivity } from "@/server/audit.service";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -58,5 +59,6 @@ export const PUT = handle(async (req: Request) => {
   const current = await getSettings();
   const url = body.redisUrl || current.redisUrl;
   await saveSettings({ redisEnabled: body.redisEnabled, redisUrl: url });
+  await logActivity(viewer.id, "redis", `${body.redisEnabled ? "启用" : "停用"}了 Redis 缓存`);
   return ok({ saved: true, hasRedisUrl: !!url });
 });

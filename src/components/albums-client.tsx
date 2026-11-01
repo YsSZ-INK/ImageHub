@@ -17,15 +17,19 @@ type Album = {
   imageCount: number;
   coverUrl: string | null;
   createdAt: string;
+  // 管理员视角：相册归属用户
+  ownerName?: string;
 };
 
-// 相册管理：列表（封面/进入相册）+ 创建/编辑/删除
-export function AlbumsClient() {
+// 相册管理：列表（封面/进入相册）+ 创建/编辑/删除 + 置顶「日常记录」虚拟相册
+export function AlbumsClient({ isAdmin }: { isAdmin?: boolean }) {
   const [albums, setAlbums] = useState<Album[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Album | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // 日常记录（虚拟相册）：总数与封面取自图片列表接口（管理员=全站，普通用户=本人）
+  const [daily, setDaily] = useState<{ total: number; coverUrl: string | null } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,6 +45,18 @@ export function AlbumsClient() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    fetch(`/api/images?scope=${isAdmin ? "admin" : "mine"}&take=1`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.ok) {
+          const first = json.data.items?.[0];
+          setDaily({ total: json.data.total ?? 0, coverUrl: first ? first.thumbUrl : null });
+        }
+      })
+      .catch(() => {});
+  }, [isAdmin]);
 
   async function remove(a: Album) {
     if (!confirm(`删除相册「${a.name}」？相册内图片不会被删除。`)) return;
@@ -75,13 +91,19 @@ export function AlbumsClient() {
       </div>
 
       {albums.length === 0 ? (
-        <EmptyState
-          title="还没有相册"
-          description="创建相册来整理你的图片"
-          action={<Button onClick={() => { setEditing(null); setOpen(true); }}>新建相册</Button>}
-        />
+        <>
+          {/* 日常记录：与普通相册同尺寸的固定卡片 */}
+          <DailyCard daily={daily} isAdmin={isAdmin} />
+          <EmptyState
+            title="还没有相册"
+            description="创建相册来整理你的图片"
+            action={<Button onClick={() => { setEditing(null); setOpen(true); }}>新建相册</Button>}
+          />
+        </>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+          {/* 日常记录：与普通相册同尺寸的固定卡片 */}
+          <DailyCard daily={daily} isAdmin={isAdmin} />
           {albums.map((a) => (
             <div
               key={a.id}
@@ -117,7 +139,10 @@ export function AlbumsClient() {
                   <VisibilityBadge visibility={a.visibility} />
                 </div>
                 <div className="flex items-center justify-between pt-1">
-                  <p className="text-xs text-muted-foreground">{new Date(a.createdAt).toLocaleDateString("zh-CN")}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {a.ownerName ? `${a.ownerName} · ` : ""}
+                    {new Date(a.createdAt).toLocaleDateString("zh-CN")}
+                  </p>
                   <div className="flex gap-1.5">
                     <Button size="sm" variant="outline" onClick={() => { setEditing(a); setOpen(true); }}>
                       <Pencil className="h-3 w-3" /> 编辑
@@ -140,5 +165,42 @@ export function AlbumsClient() {
         onSaved={load}
       />
     </div>
+  );
+}
+
+// 日常记录（虚拟相册）卡片：与普通相册同尺寸，固定在网格首位
+function DailyCard({ daily, isAdmin }: { daily: { total: number; coverUrl: string | null } | null; isAdmin?: boolean }) {
+  return (
+    <Link
+      href="/albums/daily"
+      className="group overflow-hidden rounded-xl border border-foreground/10 bg-background/55 backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-lg hover:shadow-foreground/10"
+    >
+      <div className="relative block aspect-[3/2] overflow-hidden bg-muted/30">
+        {daily?.coverUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={daily.coverUrl}
+            alt="日常记录"
+            className="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03]"
+          />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center text-muted-foreground/50">
+            <FolderOpen className="h-10 w-10" />
+          </span>
+        )}
+        <span className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5 text-xs text-white">
+          <ImageIcon className="h-3.5 w-3.5" /> {daily ? `${daily.total} 张图片` : "统计中…"}
+        </span>
+      </div>
+      <div className="space-y-2 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <p className="truncate font-medium">日常记录</p>
+          <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[0.6875rem] font-medium text-primary">自动汇总</span>
+        </div>
+        <p className="line-clamp-2 min-h-[2rem] text-xs text-muted-foreground">
+          {isAdmin ? "所有人上传的照片都汇入这里，每张照片带上传者标签" : "你上传的照片都汇入这里，每张照片带上传者标签"}
+        </p>
+      </div>
+    </Link>
   );
 }

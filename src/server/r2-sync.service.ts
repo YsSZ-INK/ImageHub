@@ -4,6 +4,7 @@ import { S3Client, ListObjectsV2Command, HeadObjectCommand } from "@aws-sdk/clie
 import { migrationStatus } from "@/server/migration.service";
 import { makeS3Client } from "@/lib/storage/r2";
 import { getStorageFor } from "@/lib/storage";
+import { invalidateImageView } from "@/server/image.service";
 import { slotConfigured, slotDisplayName } from "@/lib/markers";
 import { getThumb } from "@/lib/thumb-cache";
 import sharp from "sharp";
@@ -139,6 +140,7 @@ export async function syncR2Once(): Promise<SyncStatus> {
         if (dupIds.length > 0) {
           const del = await prisma.image.deleteMany({ where: { id: { in: dupIds } } });
           st.removed += del.count;
+          if (del.count > 0) await invalidateImageView(...dupIds);
         }
 
         const known = new Set(records.filter((r) => !dupIds.includes(r.id)).map((r) => r.storageKey));
@@ -151,6 +153,7 @@ export async function syncR2Once(): Promise<SyncStatus> {
         } else if (missing.length > 0) {
           const del = await prisma.image.deleteMany({ where: { id: { in: missing }, storage: { in: family } } });
           st.removed += del.count;
+          if (del.count > 0) await invalidateImageView(...missing);
         }
 
         // 桶有站无 → 收录（2 分钟前的旧对象 + Head 复核，避开上传/删除竞态；连接测试对象跳过）

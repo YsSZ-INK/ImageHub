@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
+import { cachedJson, invalidateJson } from "@/lib/cache";
+import { logActivity } from "@/server/audit.service";
 import { hasAccessTo } from "@/server/access.service";
 import { getStorageFor } from "@/lib/storage";
 import { processAndStoreImage, processAndStoreVideo, processAndStoreVideoFile, detectVideoMime } from "@/lib/image";
@@ -55,13 +57,16 @@ export function toDTO(img: Image & { user?: { name: string } }): ImageDTO {
 }
 
 // ============ 可见性判定 ============
-// PUBLIC: 所有用户可见（含未登录，用于外链直链）；UNLISTED: 有链接可见（含未登录），不进列表；PRIVATE: 仅本人/管理员
+// PUBLIC: 所有用户可见（含未登录，可作免登录外链）；UNLISTED（友链）: 登录任意账户即可见，不进列表；
+// PRIVATE: 仅本人/管理员
 // PENDING（待审核）：仅本人与管理员可见——匿名外链与其他登录用户都不可见，审核通过后才对公开可见
 export function canView(img: Image, viewer: Viewer | null): boolean {
   if (viewer?.role === "ADMIN") return true;
   if (img.userId === viewer?.id) return true;
   if (img.status !== "PUBLISHED") return false;
-  return img.visibility === "PUBLIC" || img.visibility === "UNLISTED";
+  if (img.visibility === "PUBLIC") return true;
+  // 友链：登录任意账户即可见（未登录访客不可见）
+  return img.visibility === "UNLISTED" && !!viewer;
 }
 
 // 单张图片访问校验（防 IDOR）。PRIVATE/PENDING 之外再放宽一档：
@@ -82,13 +87,52 @@ export async function getImageForView(id: string, viewer: Viewer | null, include
   return img;
 }
 
+// 直链文件服务所需的字段快照（raw/thumb 高频读缓存的值类型）
+export type PublicImageSnapshot = Pick<Image, "id" | "mimeType" | "storage" | "storageKey" | "thumbKey" | "filename">;
+
+// 匿名直链快速路径：缓存「匿名可见」图片行（已发布 + 公开），raw/thumb 免查库直出。
+// Redis 30 秒 / 进程内存兜底；友链需登录（不缓存）、私有/审核中/已删除不缓存，每次走完整校验。
+// 所有图片行变更入口用 invalidateImageView 主动失效，TTL 兜底。
+export async function getImageForPublicView(id: string): Promise<PublicImageSnapshot | null> {
+  const snap = await cachedJson<PublicImageSnapshot>(`imgview:${id}`, 30_000, async () => {
+    const img = await prisma.image.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        mimeType: true,
+        storage: true,
+        storageKey: true,
+        thumbKey: true,
+        filename: true,
+        visibility: true,
+        status: true,
+        deletedAt: true,
+      },
+    });
+    if (!img || img.deletedAt || img.status !== "PUBLISHED" || img.visibility !== "PUBLIC") {
+      return undefined; // 非匿名可见（友链需登录）：不缓存
+    }
+    const { visibility: _v, status: _s, deletedAt: _d, ...snap } = img;
+    return snap;
+  });
+  return snap ?? null;
+}
+
+// 图片行变更后失效直链缓存（改可见性/审核/删除/恢复/移动相册/迁移存储等入口调用）
+export async function invalidateImageView(...ids: string[]) {
+  if (ids.length === 0) return;
+  await invalidateJson(...ids.map((id) => `imgview:${id}`));
+}
+
 // 重新提交审核：仅本人/管理员，图片回到待审核状态（从画廊、公开直链与动态中隐藏）
 export async function requestReview(id: string, viewer: Viewer): Promise<ImageDTO> {
   const img = await prisma.image.findUnique({ where: { id } });
   if (!img || img.deletedAt) throw new AppError("图片不存在", 404);
   if (img.userId !== viewer.id && viewer.role !== "ADMIN") throw new AppError("无权操作该图片", 403);
   if (img.status === "PENDING") return toDTO(img);
-  return toDTO(await prisma.image.update({ where: { id }, data: { status: "PENDING" } }));
+  const updated = await prisma.image.update({ where: { id }, data: { status: "PENDING" } });
+  await invalidateImageView(id);
+  return toDTO(updated);
 }
 
 // 审核通过（管理员）：待审核图片进入画廊
@@ -97,10 +141,32 @@ export async function approveImage(id: string, viewer: Viewer): Promise<ImageDTO
   const img = await prisma.image.findUnique({ where: { id } });
   if (!img || img.deletedAt) throw new AppError("图片不存在", 404);
   if (img.status === "PUBLISHED") return toDTO(img);
-  return toDTO(await prisma.image.update({ where: { id }, data: { status: "PUBLISHED" } }));
+  const updated = await prisma.image.update({ where: { id }, data: { status: "PUBLISHED" } });
+  await invalidateImageView(id);
+  return toDTO(updated);
 }
 
 // ============ 上传（含配额、去重） ============
+// 默认相册「我的相册」：懒创建，未指定相册的上传自动归入
+export const MY_ALBUM_NAME = "我的相册";
+
+export async function ensureMyAlbum(userId: string) {
+  const existing = await prisma.album.findFirst({
+    where: { userId, name: MY_ALBUM_NAME },
+    orderBy: { createdAt: "asc" },
+  });
+  if (existing) return existing;
+  return prisma.album.create({
+    data: {
+      userId,
+      name: MY_ALBUM_NAME,
+      slug: makeSlug(MY_ALBUM_NAME),
+      visibility: "PRIVATE",
+      description: "上传的图片默认存放于此",
+    },
+  });
+}
+
 export async function uploadImages(
   user: User,
   files: { buf: Buffer; name: string; contentType: string }[],
@@ -108,10 +174,12 @@ export async function uploadImages(
 ): Promise<{ results: (ImageDTO | { name: string; error: string })[]; deduped: number }> {
   const results: (ImageDTO | { name: string; error: string })[] = [];
   let deduped = 0;
+  // 未指定相册 → 归入「我的相册」（整批只解析一次）
+  const targetAlbumId = opts?.albumId ?? (await ensureMyAlbum(user.id)).id;
 
   for (const f of files) {
     try {
-      const dto = await uploadOne(user, f, opts?.albumId ?? null);
+      const dto = await uploadOne(user, f, targetAlbumId);
       results.push(dto);
       if ("deduped" in dto && dto.deduped) deduped++;
     } catch (err) {
@@ -120,6 +188,8 @@ export async function uploadImages(
       results.push({ name: f.name, error: msg });
     }
   }
+  const okCount = results.filter((r) => !("error" in r)).length;
+  if (okCount > 0) await logActivity(user.id, "upload", `上传了 ${okCount} 张图片`);
   return { results, deduped };
 }
 
@@ -144,8 +214,8 @@ async function uploadOne(
     where: { userId: user.id, sha256, deletedAt: null },
   });
   if (dup) {
-    // 重复上传复用已有记录；本次指定了相册则把记录挂过去
-    if (albumId && dup.albumId !== albumId) {
+    // 重复上传复用已有记录；记录尚未归属任何相册时挂到本次指定的相册（不抢已归档图片的归属）
+    if (albumId && !dup.albumId) {
       const updated = await prisma.image.update({
         where: { id: dup.id },
         data: { albumId },
@@ -181,7 +251,8 @@ async function uploadOne(
       sha256: processed.sha256,
       blurhash: processed.blurhash,
       albumId,
-      // 管理员上传免审核直接发布；普通用户上传进入待审核队列
+      // 默认私有：不进公共画廊，用户在「我的图片」勾选后才公开（管理员上传免审核直接发布）
+      visibility: "PRIVATE",
       status: user.role === "ADMIN" ? "PUBLISHED" : "PENDING",
     },
     include: { user: { select: { name: true } } },
@@ -200,9 +271,13 @@ export type ListParams = {
   take?: number;
   // 按存储位置过滤（local / r2:<下标> / r2 / r2b），我的照片筛选用
   storage?: string;
+  // 日常记录筛选：按上传者用户名（管理员）与上传时间范围，可组合可单独使用
+  owner?: string;
+  from?: Date;
+  to?: Date;
 };
 
-export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; nextCursor: string | null }> {
+export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; nextCursor: string | null; total: number }> {
   const take = Math.min(p.take ?? 24, 60);
   const where: Record<string, unknown> = {};
 
@@ -268,22 +343,50 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
     : p.sort === "largest" ? [{ size: "desc" as const }, { id: "desc" as const }]
     : [{ createdAt: "desc" as const }, { id: "desc" as const }];
 
+  // 日常记录筛选：按上传者用户名 + 上传时间范围（可组合、可单独使用；用户名不存在时结果为空）
+  if (p.owner) where.user = { name: p.owner };
+  if (p.from || p.to) {
+    where.createdAt = {
+      ...(p.from ? { gte: p.from } : {}),
+      ...(p.to ? { lte: p.to } : {}),
+    };
+  }
+
   if (p.storage) {
     if (!/^(local|r2(:\d+)?|r2b)$/.test(p.storage)) throw new AppError("无效的存储位置", 400);
     where.storage = p.storage;
   }
 
-  const rows = await prisma.image.findMany({
-    where,
-    orderBy,
-    take: take + 1,
-    ...(p.cursor ? { cursor: { id: p.cursor }, skip: 1 } : {}),
-    include: { user: { select: { name: true } } },
-  });
+  const [rows, total] = await Promise.all([
+    prisma.image.findMany({
+      where,
+      orderBy,
+      take: take + 1,
+      ...(p.cursor ? { cursor: { id: p.cursor }, skip: 1 } : {}),
+      include: { user: { select: { name: true } } },
+    }),
+    prisma.image.count({ where }), // 总数：前端据此显示「共 N 页」
+  ]);
 
   const hasMore = rows.length > take;
   const items = rows.slice(0, take).map(toDTO);
-  return { items, nextCursor: hasMore ? rows[take - 1].id : null };
+  return { items, nextCursor: hasMore ? rows[take - 1].id : null, total };
+}
+
+// 「我的图片」跨页全选：返回当前筛选（可选按存储位置）下全部未删除图片的 id
+export async function listMyImageIds(viewer: Viewer, storage?: string) {
+  const where: Record<string, unknown> = { userId: viewer.id, deletedAt: null };
+  if (storage) {
+    if (!/^(local|r2(:\d+)?|r2b)$/.test(storage)) throw new AppError("无效的存储位置", 400);
+    where.storage = storage;
+  }
+  const rows = await prisma.image.findMany({
+    where,
+    select: { id: true },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 10000,
+  });
+  return { ids: rows.map((r) => r.id) };
 }
 
 // ============ 单图详情 / 更新 / 删除 ============
@@ -304,7 +407,7 @@ async function assertOwnership(id: string, viewer: Viewer) {
 }
 
 export async function updateImage(id: string, viewer: Viewer, data: { filename?: string; visibility?: string; albumId?: string | null }) {
-  await assertOwnership(id, viewer);
+  const old = await assertOwnership(id, viewer);
   if (data.albumId) {
     const album = await prisma.album.findUnique({ where: { id: data.albumId } });
     if (!album || (album.userId !== viewer.id && viewer.role !== "ADMIN")) {
@@ -316,6 +419,11 @@ export async function updateImage(id: string, viewer: Viewer, data: { filename?:
     data: { filename: data.filename, visibility: data.visibility, albumId: data.albumId },
     include: { user: { select: { name: true } } },
   });
+  await invalidateImageView(id);
+  // 「进入画廊」等可见性变更写入日志
+  if (data.visibility && data.visibility !== old.visibility) {
+    await logActivity(viewer.id, "visibility", `把「${img.filename}」设为${VIS_TEXT[data.visibility] ?? data.visibility}`);
+  }
   return toDTO(img);
 }
 
@@ -323,11 +431,13 @@ export async function updateImage(id: string, viewer: Viewer, data: { filename?:
 export async function softDeleteImage(id: string, viewer: Viewer) {
   await assertOwnership(id, viewer);
   await clearAlbumCovers([id]);
-  return prisma.image.update({ where: { id }, data: { deletedAt: new Date() } });
+  const img = await prisma.image.update({ where: { id }, data: { deletedAt: new Date() } });
+  await invalidateImageView(id);
+  return img;
 }
 
 // 封面图被移出相册/删除后，清空引用它的相册封面（excludeAlbumId 用于图片仍在目标相册内的情形）
-async function clearAlbumCovers(imageIds: string[], excludeAlbumId?: string) {
+export async function clearAlbumCovers(imageIds: string[], excludeAlbumId?: string) {
   await prisma.album.updateMany({
     where: {
       coverImageId: { in: imageIds },
@@ -339,7 +449,9 @@ async function clearAlbumCovers(imageIds: string[], excludeAlbumId?: string) {
 
 export async function restoreImage(id: string, viewer: Viewer) {
   await assertOwnership(id, viewer);
-  return prisma.image.update({ where: { id }, data: { deletedAt: null } });
+  const img = await prisma.image.update({ where: { id }, data: { deletedAt: null } });
+  await invalidateImageView(id);
+  return img;
 }
 
 // 彻底删除：同时删除存储对象（按记录的实际存放位置）；配额为实时聚合，无需扣减
@@ -348,6 +460,7 @@ export async function purgeImage(id: string, viewer: Viewer) {
   const storage = await getStorageFor(img.storage);
   await clearAlbumCovers([id]);
   await prisma.image.delete({ where: { id } });
+  await invalidateImageView(id);
   await Promise.allSettled([storage.delete(img.storageKey), storage.delete(img.thumbKey)]);
 }
 
@@ -362,6 +475,9 @@ export async function purgeExpiredTrash() {
 }
 
 // ============ 批量操作 ============
+// 可见性中文名（日志用）
+const VIS_TEXT: Record<string, string> = { PUBLIC: "公开", UNLISTED: "友链", PRIVATE: "私有" };
+
 export async function batchImages(viewer: Viewer, input: z.infer<typeof batchActionSchema>) {
   const { ids, action } = input;
   // 归属校验：仅能操作自己的图片（管理员除外）
@@ -371,30 +487,38 @@ export async function batchImages(viewer: Viewer, input: z.infer<typeof batchAct
   if (owned.length === 0) throw new AppError("没有可操作的图片", 404);
 
   switch (action) {
-    case "delete":
+    case "delete": {
       await clearAlbumCovers(owned.map((i) => i.id));
       await prisma.image.updateMany({
         where: { id: { in: owned.map((i) => i.id) }, deletedAt: null },
         data: { deletedAt: new Date() },
       });
+      await logActivity(viewer.id, "image_delete", `把 ${owned.length} 张图片移入回收站`);
       break;
-    case "restore":
+    }
+    case "restore": {
       await prisma.image.updateMany({
         where: { id: { in: owned.map((i) => i.id) }, deletedAt: { not: null } },
         data: { deletedAt: null },
       });
+      await logActivity(viewer.id, "restore", `从回收站恢复了 ${owned.length} 张图片`);
       break;
-    case "purge":
+    }
+    case "purge": {
       for (const img of owned) await purgeImage(img.id, viewer);
+      await logActivity(viewer.id, "purge", `彻底删除了 ${owned.length} 张图片`);
       break;
-    case "visibility":
+    }
+    case "visibility": {
       if (!input.visibility) throw new AppError("缺少可见性参数", 400);
       await prisma.image.updateMany({
         where: { id: { in: owned.map((i) => i.id) } },
         data: { visibility: input.visibility },
       });
+      await logActivity(viewer.id, "visibility", `把 ${owned.length} 张图片设为${VIS_TEXT[input.visibility] ?? input.visibility}`);
       break;
-    case "album":
+    }
+    case "album": {
       if (input.albumId) {
         const album = await prisma.album.findUnique({ where: { id: input.albumId } });
         if (!album || (album.userId !== viewer.id && viewer.role !== "ADMIN")) {
@@ -407,8 +531,17 @@ export async function batchImages(viewer: Viewer, input: z.infer<typeof batchAct
         where: { id: { in: owned.map((i) => i.id) } },
         data: { albumId: input.albumId ?? null },
       });
+      if (input.albumId) {
+        const target = await prisma.album.findUnique({ where: { id: input.albumId }, select: { name: true } });
+        await logActivity(viewer.id, "album", `把 ${owned.length} 张图片移入相册「${target?.name ?? "未命名"}」`);
+      } else {
+        await logActivity(viewer.id, "album", `把 ${owned.length} 张图片移出了相册`);
+      }
       break;
+    }
   }
+  // 批量操作统一失效直链缓存（delete/restore/purge/visibility/album 全部改变图片行）
+  await invalidateImageView(...owned.map((i) => i.id));
   return { affected: owned.length };
 }
 
@@ -424,6 +557,9 @@ export async function listAlbums(viewer: Viewer, username?: string) {
     const target = await prisma.user.findUnique({ where: { name: username } });
     if (!target) throw new AppError("用户不存在", 404);
     userId = target.id;
+  } else if (viewer.role !== "ADMIN") {
+    // 相册管理页：普通用户只能看到自己的相册，管理员可见全部人的
+    userId = viewer.id;
   }
   const albums = await prisma.album.findMany({
     where: {
@@ -432,6 +568,7 @@ export async function listAlbums(viewer: Viewer, username?: string) {
     },
     orderBy: { createdAt: "desc" },
     include: {
+      user: { select: { name: true } },
       _count: { select: { images: { where: { deletedAt: null } } } },
     },
   });
@@ -441,6 +578,21 @@ export async function listAlbums(viewer: Viewer, username?: string) {
     ? await prisma.image.findMany({ where: { id: { in: coverIds } }, select: { id: true, mimeType: true } })
     : [];
   const videoCovers = new Set(coverRows.filter((i) => i.mimeType.startsWith("video/")).map((i) => i.id));
+  // 封面默认值：未手动设置封面（或封面指向视频无缩略图）时，默认取相册内第一张图片（最早上传）作为封面
+  const coverless = albums.filter((a) => !a.coverImageId || videoCovers.has(a.coverImageId));
+  const fallbacks = new Map<string, string | null>();
+  await Promise.all(
+    coverless.map(async (a) => {
+      const first = a._count.images
+        ? await prisma.image.findFirst({
+            where: { albumId: a.id, deletedAt: null, mimeType: { not: { startsWith: "video" } } },
+            orderBy: { createdAt: "asc" },
+            select: { id: true },
+          })
+        : null;
+      fallbacks.set(a.id, first ? `/api/images/${first.id}/thumb` : null);
+    })
+  );
   return albums.map((a) => ({
     id: a.id,
     name: a.name,
@@ -450,7 +602,9 @@ export async function listAlbums(viewer: Viewer, username?: string) {
     coverImageId: a.coverImageId,
     imageCount: a._count.images,
     createdAt: a.createdAt,
-    coverUrl: a.coverImageId && !videoCovers.has(a.coverImageId) ? `/api/images/${a.coverImageId}/thumb` : null,
+    // 管理员视角附带相册主人，便于区分所有人的相册
+    ownerName: viewer.role === "ADMIN" ? a.user.name : undefined,
+    coverUrl: a.coverImageId && !videoCovers.has(a.coverImageId) ? `/api/images/${a.coverImageId}/thumb` : fallbacks.get(a.id) ?? null,
   }));
 }
 

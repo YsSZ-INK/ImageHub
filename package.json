@@ -2,6 +2,7 @@
   "name": "imagehub",
   "version": "0.1.0",
   "private": true,
+  "license": "GPL-3.0-only",
   "scripts": {
     "postinstall": "prisma generate --schema prisma/schema.dev.prisma",
     "dev": "next dev",

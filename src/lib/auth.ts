@@ -1,19 +1,32 @@
-import NextAuth from "next-auth";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { authConfig } from "@/lib/auth.config";
 import { rateLimit } from "@/lib/rate-limit";
+import { logActivity } from "@/server/audit.service";
 
 // 安全员（渗透测试修复）：登录接口原本无任何限流，可对单账号无限暴力猜解。
 // 以邮箱维度做固定窗口限流（成功登录也计数，10 次/分钟足够正常使用）。
 const LOGIN_MAX = 10;
 const LOGIN_WINDOW_MS = 60_000;
 
+// 安全员（渗透测试修复）：限流/封禁需要给前端区分文案。authorize 抛普通 Error 会被
+// Auth.js 归一为 error=Configuration，前端无从分辨（封禁用户会误看到「密码错误」）。
+// 改用 CredentialsSignin 子类携带 code，客户端 signIn 返回值里 code 原样可达，
+// 登录依然失败（不带会话），仅文案可区分。
+class LoginBlockedError extends CredentialsSignin {
+  code: string;
+  constructor(code: string) {
+    super();
+    this.code = code;
+  }
+}
+
 // 完整 NextAuth 实例（Node 运行时）：Credentials 登录 + JWT 会话
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
-  session: { strategy: "jwt", maxAge: 30 * 24 * 3600 },
+  session: { strategy: "jwt", maxAge: 3 * 24 * 3600 },
   providers: [
     Credentials({
       name: "邮箱密码登录",
@@ -30,15 +43,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         };
         if (!email || !password) return null;
         const rl = await rateLimit(`login:${email.toLowerCase()}`, LOGIN_MAX, LOGIN_WINDOW_MS);
-        if (!rl.success) throw new Error("登录尝试过于频繁，请稍后再试");
+        if (!rl.success) throw new LoginBlockedError("rate_limited");
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user) return null;
         if (user.status === "BANNED") {
-          // 抛错携带文案，登录页展示
-          throw new Error("账号已被封禁，请联系管理员");
+          throw new LoginBlockedError("banned");
         }
         const valid = await bcrypt.compare(password, user.passwordHash);
         if (!valid) return null;
+        await logActivity(user.id, "login", "登录了站点");
         return {
           id: user.id,
           email: user.email,

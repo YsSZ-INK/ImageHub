@@ -2,15 +2,18 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
 import { getStorageFor } from "@/lib/storage";
+import { invalidateImageView } from "@/server/image.service";
 import { markerLabel, slotDisplayName } from "@/lib/markers";
 import { getSettings } from "@/lib/settings";
 import { deleteAccount } from "@/server/user.service";
+import { logActivity } from "@/server/audit.service";
 import type { z } from "zod";
 import type { adminUserCreateSchema } from "@/lib/validation";
 
 // ============ 管理后台 ============
 
 export async function adminListUsers(search?: string) {
+  const superId = await superAdminIdOf();
   const users = await prisma.user.findMany({
     where: search
       ? { OR: [{ email: { contains: search } }, { name: { contains: search } }] }
@@ -38,7 +41,20 @@ export async function adminListUsers(search?: string) {
     storageUsed: (localMap.get(u.id) ?? 0n).toString(),
     imageCount: u._count.images,
     createdAt: u.createdAt,
+    isSuperAdmin: u.id === superId,
   }));
+}
+
+// ============ 超级管理员 ============
+// 超级管理员 = 站内最早的 ADMIN 账号（站长）。其他管理员可管理普通用户，
+// 但不能重置其密码，也不能封禁/降级（否则可先降级再改密，绕过密码保护）。
+export async function superAdminIdOf(): Promise<string | null> {
+  const first = await prisma.user.findFirst({
+    where: { role: "ADMIN" },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  return first?.id ?? null;
 }
 
 // 管理员创建用户（邮箱/用户名查重 + 强密码哈希，角色与配额由管理员指定）
@@ -70,23 +86,30 @@ export async function adminDeleteUser(adminId: string, id: string) {
   // 保护：管理员需先降级再删除，避免误删后台管理账号
   if (user.role === "ADMIN") throw new AppError("管理员不能直接删除，请先降级为普通用户", 400);
   await deleteAccount(user);
+  await logActivity(adminId, "admin_user", `删除了用户「${user.name}」及其全部数据`);
 }
 
 export async function adminUpdateUser(
   adminId: string,
   id: string,
-  patch: { status?: string; role?: string; storageQuotaGB?: number }
+  patch: { status?: string; role?: string; storageQuotaGB?: number; password?: string }
 ) {
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) throw new AppError("用户不存在", 404);
   // 保护：不能封禁自己，避免把自己锁在后台外面
   if (patch.status === "BANNED" && id === adminId) throw new AppError("不能封禁自己", 400);
+  // 保护：超级管理员不可被重置密码/封禁/降级（先降级再改密可绕过密码保护，一并封死）
+  if (id === (await superAdminIdOf())) {
+    if (patch.password) throw new AppError("超级管理员的密码不能由其他管理员重置", 403);
+    if (patch.status === "BANNED") throw new AppError("不能封禁超级管理员", 403);
+    if (patch.role === "USER") throw new AppError("不能降级超级管理员", 403);
+  }
   // 保护：最后一个管理员不能降级，避免后台失去管理能力
   if (patch.role === "USER" && user.role === "ADMIN") {
     const adminCount = await prisma.user.count({ where: { role: "ADMIN" } });
     if (adminCount <= 1) throw new AppError("不能降级最后一个管理员", 400);
   }
-  return prisma.user.update({
+  const updated = await prisma.user.update({
     where: { id },
     data: {
       ...(patch.status ? { status: patch.status } : {}),
@@ -94,8 +117,19 @@ export async function adminUpdateUser(
       ...(patch.storageQuotaGB !== undefined
         ? { storageQuota: BigInt(Math.round(patch.storageQuotaGB * 1024 ** 3)) }
         : {}),
+      // 重置密码：服务端哈希，明文不落库
+      ...(patch.password ? { passwordHash: await bcrypt.hash(patch.password, 12) } : {}),
     },
   });
+  const verb = patch.password
+    ? `重置了用户「${user.name}」的密码`
+    : patch.status === "BANNED"
+      ? `封禁了用户「${user.name}」`
+      : patch.status === "ACTIVE"
+        ? `解封了用户「${user.name}」`
+        : `更新了用户「${user.name}」的资料`;
+  await logActivity(adminId, "admin_user", verb);
+  return updated;
 }
 
 // 图片审核队列（全站待审核图片，页码分页）
@@ -130,11 +164,24 @@ export async function adminListPendingImages(page = 1, pageSize = 24) {
   };
 }
 
+// 全部通过：待审核图片一次性全部发布进画廊
+export async function adminApproveAllImages() {
+  const where = { status: "PENDING", deletedAt: null };
+  const ids = await prisma.image.findMany({ where, select: { id: true } });
+  if (ids.length > 0) {
+    await prisma.image.updateMany({ where, data: { status: "PUBLISHED" } });
+    await invalidateImageView(...ids.map((i) => i.id));
+  }
+  return { affected: ids.length };
+}
+
 // 下架：改为 PRIVATE（仍属用户自己可见，但不进画廊）
 export async function adminTakedownImage(id: string) {
   const img = await prisma.image.findUnique({ where: { id } });
   if (!img) throw new AppError("图片不存在", 404);
-  return prisma.image.update({ where: { id }, data: { visibility: "PRIVATE" } });
+  const updated = await prisma.image.update({ where: { id }, data: { visibility: "PRIVATE" } });
+  await invalidateImageView(id);
+  return updated;
 }
 
 export async function adminPurgeImage(id: string) {
@@ -143,6 +190,7 @@ export async function adminPurgeImage(id: string) {
   // 按记录的实际存放位置删除（local / r2:<n>）；配额为实时聚合，无需扣减
   const storage = await getStorageFor(img.storage);
   await prisma.image.delete({ where: { id } });
+  await invalidateImageView(id);
   await Promise.allSettled([storage.delete(img.storageKey), storage.delete(img.thumbKey)]);
 }
 

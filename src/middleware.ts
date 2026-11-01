@@ -19,7 +19,7 @@ const PUBLIC_API = [
 
 const PUBLIC_PAGES = ["/", "/forgot-password", "/reset-password", "/verify-email"];
 
-// 图片直链（raw/thumb）对匿名放行到路由层，由可见性校验决定（PUBLIC/UNLISTED 可作外链）
+// 图片直链（raw/thumb）对匿名放行到路由层，由可见性校验决定（仅 PUBLIC 可作免登录外链；友链需登录）
 const ANON_IMAGE_ASSET_RE = /^\/api\/images\/[^/]+\/(raw|thumb)$/;
 
 const PROTECTED_PAGE_PREFIX = ["/gallery", "/u/", "/albums", "/images", "/trash", "/settings", "/admin"];

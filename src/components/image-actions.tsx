@@ -58,7 +58,7 @@ export function CopyField({ imageId, filename }: { imageId: string; filename: st
 export function VisibilityBadge({ visibility, className }: { visibility: string; className?: string }) {
   const map: Record<string, { icon: typeof Globe; text: string; cls: string }> = {
     PUBLIC: { icon: Globe, text: "公开", cls: "bg-zinc-800/5 text-zinc-600 ring-1 ring-zinc-800/10" },
-    UNLISTED: { icon: EyeOff, text: "有链可见", cls: "bg-zinc-800/12 text-zinc-700 ring-1 ring-zinc-800/20" },
+    UNLISTED: { icon: EyeOff, text: "友链", cls: "bg-zinc-800/12 text-zinc-700 ring-1 ring-zinc-800/20" },
     PRIVATE: { icon: Lock, text: "私有", cls: "bg-zinc-800 text-zinc-50" },
   };
   const it = map[visibility] ?? map.PUBLIC;

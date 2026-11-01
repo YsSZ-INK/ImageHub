@@ -1,7 +1,6 @@
 import { requireUser } from "@/lib/session";
 import { localUsageOf } from "@/server/storage-stats";
 import { SettingsClient } from "@/components/settings-client";
-import { AccessPanel } from "@/components/access-panel";
 
 export default async function DashboardSettingsPage() {
   const user = await requireUser();
@@ -20,7 +19,6 @@ export default async function DashboardSettingsPage() {
         createdAt: user.createdAt.toISOString(),
       }}
       />
-      <AccessPanel />
     </div>
   );
 }

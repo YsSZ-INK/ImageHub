@@ -17,7 +17,7 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
   const params = useSearchParams();
   const callbackUrl = params.get("callbackUrl") || "/gallery";
 
-  const [loginData, setLoginData] = useState({ email: "", password: "", remember: true });
+  const [loginData, setLoginData] = useState({ email: "", password: "", remember: false });
   const [regData, setRegData] = useState({ email: "", name: "", password: "" });
   const [loading, setLoading] = useState(false);
 
@@ -32,9 +32,11 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
         redirect: false,
       });
       if (res?.error) {
-        toast.error(res.code === "CALLBACK_ERROR" ? "登录失败" : "邮箱或密码错误");
-        // 处理 authorize 抛出的封禁文案
-        if (res.error.includes("封禁")) toast.error(res.error);
+        // 按服务端 LoginBlockedError 携带的 code 区分文案（限流 / 封禁 / 其余视为凭据错误）
+        if (res.code === "rate_limited") toast.error("登录尝试过于频繁，请稍后再试");
+        else if (res.code === "banned") toast.error("账号已被封禁，请联系管理员");
+        else if (res.code === "CALLBACK_ERROR") toast.error("登录失败");
+        else toast.error("邮箱或密码错误");
       } else {
         router.push(callbackUrl);
         router.refresh();
@@ -62,7 +64,7 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
       const login = await signIn("credentials", {
         email: regData.email,
         password: regData.password,
-        remember: "true",
+        remember: "false",
         redirect: false,
       });
       if (!login?.error) {
@@ -116,7 +118,7 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
                 checked={loginData.remember}
                 onChange={(e) => setLoginData({ ...loginData, remember: e.target.checked })}
               />
-              记住我（30 天）
+              记住我
             </label>
             <Link href="/forgot-password" className="text-muted-foreground hover:underline">
               忘记密码？

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { handle, assertSameOrigin, ok } from "@/lib/api";
 import { registerSchema } from "@/lib/validation";
 import { registerUser, publicUser } from "@/server/user.service";
+import { logActivity } from "@/server/audit.service";
 import { getSettings } from "@/lib/settings";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 
@@ -20,5 +21,6 @@ export const POST = handle(async (req: Request) => {
   const body = await req.json();
   const input = registerSchema.parse(body);
   const user = await registerUser(input);
+  await logActivity(user.id, "register", `注册了账号（${user.email}）`);
   return ok({ user: await publicUser(user) }, 201);
 });

@@ -78,7 +78,7 @@ export function AlbumFormDialog({
             <Label>可见性</Label>
             <Select value={form.visibility} onChange={(e) => setForm({ ...form, visibility: e.target.value })}>
               <option value="PUBLIC">公开（登录用户可见）</option>
-              <option value="UNLISTED">有链可见（拿到链接即可看）</option>
+              <option value="UNLISTED">友链（登录任意账户即可看）</option>
               <option value="PRIVATE">私有（仅自己 · 不提供外链）</option>
             </Select>
           </div>

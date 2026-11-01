@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Eye, Clock, ShieldCheck, UserCheck, Send, Search, UserX } from "lucide-react";
+import { Loader2, Eye, Clock, ShieldCheck, Send, Search, UserX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AvatarFallbackIcon } from "@/components/avatar";
@@ -96,8 +96,9 @@ export function UsersDirectory({ users, hideViewable = false }: { users: UserDir
               </Button>
             )}
             {u.relation === "grantedToMe" && (
-              <Button size="sm" variant="ghost" disabled>
-                <UserCheck className="h-3.5 w-3.5" /> 已授权对方
+              // 单向授权 ≠ 互看：已授权对方后，仍可反向申请查看 TA 的图片
+              <Button size="sm" variant="outline" onClick={() => request(u)} disabled={busyId === u.id}>
+                {busyId === u.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} 申请互看
               </Button>
             )}
           </div>
@@ -114,5 +115,5 @@ const RELATION_TEXT: Record<UserDirectoryEntry["relation"], string> = {
   pendingFromMe: "你已申请，等待对方审批",
   pendingToMe: "对方申请查看你的图片",
   canViewThem: "你已获准浏览 TA 的图片",
-  grantedToMe: "你已授权 TA 浏览你的图片",
+  grantedToMe: "你已授权 TA 浏览你的图片（可申请互看）",
 };

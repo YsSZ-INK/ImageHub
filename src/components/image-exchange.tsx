@@ -38,11 +38,11 @@ export function ExchangeView({
       {/* 待我审批提醒 */}
       {pendingToMe > 0 && (
         <Link
-          href="/settings"
+          href="#access-panel"
           className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 transition-colors hover:bg-amber-500/15 dark:text-amber-400"
         >
           <ShieldCheck className="h-4 w-4 shrink-0" />
-          有 {pendingToMe} 位用户申请查看你的图片，点击前往个人中心审批
+          有 {pendingToMe} 位用户申请查看你的图片，点击前往下方「图片访问」面板审批
         </Link>
       )}
 
@@ -112,7 +112,7 @@ function UserPane({
   initialItems?: ImageDTO[];
   initialCursor?: string | null;
 }) {
-  const { items, page, hasNext, loading, gotoPage } = useCursorPager(
+  const { items, page, hasNext, totalPages, loading, gotoPage } = useCursorPager(
     { scope: "user", username },
     { initialItems, initialCursor }
   );
@@ -125,7 +125,7 @@ function UserPane({
   return (
     <div className="space-y-3">
       <ImageGrid items={items} />
-      <Pager page={page} hasNext={hasNext} disabled={loading} onGo={gotoPage} />
+      <Pager page={page} hasNext={hasNext} totalPages={totalPages} disabled={loading} onGo={gotoPage} />
     </div>
   );
 }

@@ -312,7 +312,7 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
         <div className="flex items-center gap-2 text-sm">
           <span className="shrink-0 text-muted-foreground">上传到相册</span>
           <Select value={albumId} onChange={(e) => setAlbumId(e.target.value)} className="flex-1">
-            <option value="">不归入相册</option>
+            <option value="">我的相册（默认）</option>
             {albums.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}

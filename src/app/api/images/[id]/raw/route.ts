@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { handle, AppError } from "@/lib/api";
 import { getCurrentUser } from "@/lib/session";
-import { getImageForView } from "@/server/image.service";
+import { getImageForView, getImageForPublicView, type PublicImageSnapshot } from "@/server/image.service";
 import { getStorageFor } from "@/lib/storage";
 import { getRawCached, RAW_CACHE_MAX_FILE } from "@/lib/raw-cache";
 
@@ -9,14 +9,18 @@ export const runtime = "nodejs";
 
 /**
  * 原文件访问（图片原图 / 视频原片）：
- * - PUBLIC / UNLISTED：免登录直链（外链），响应可公开缓存
+ * - PUBLIC：免登录直链（外链），响应可公开缓存；匿名请求走 Redis/内存缓存快照免查库
+ * - UNLISTED（友链）：登录任意账户可见，未登录 401
  * - PRIVATE：仅本人 / 管理员（未登录 401）
  * - 校验可见性（防 IDOR），响应不暴露存储 key
  * - 视频（<video> 拖动进度条）依赖 Range 请求：支持单区间 bytes=start-end，返回 206
  */
 async function serveFile(req: Request, id: string, kind: "raw" | "thumb", download = false) {
   const viewer = await getCurrentUser();
-  const img = await getImageForView(id, viewer);
+  // 匿名高频直链：公开图优先取缓存行快照（0 次查库）；未命中 / 非公开 / 登录用户走完整校验
+  let img: PublicImageSnapshot | null = null;
+  if (!viewer) img = await getImageForPublicView(id);
+  if (!img) img = await getImageForView(id, viewer);
   // 按记录的实际存放位置取文件（local / r2）
   const storage = await getStorageFor(img.storage);
   const key = kind === "thumb" ? img.thumbKey : img.storageKey;

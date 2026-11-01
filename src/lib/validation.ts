@@ -44,7 +44,7 @@ export const imageUpdateSchema = z.object({
 });
 
 export const batchActionSchema = z.object({
-  ids: z.array(z.string().min(1)).min(1, "请先选择图片").max(200),
+  ids: z.array(z.string().min(1)).min(1, "请先选择图片").max(2000),
   action: z.enum(["delete", "restore", "purge", "visibility", "album"]),
   visibility: z.enum(visibilityValues).optional(),
   albumId: z.string().nullable().optional(),
@@ -63,16 +63,18 @@ export const albumUpdateSchema = z.object({
   coverImageId: z.string().nullable().optional(),
 });
 
-// 图文动态：文字 + 1~9 张图（朋友圈式九宫格）
+// 图文动态：文字（可纯文字）+ 最多 9 张图（朋友圈式九宫格）
 export const postCreateSchema = z.object({
   caption: z.string().max(1000, "文字最长 1000 字").default(""),
-  imageIds: z.array(z.string().min(1)).min(1, "至少选择一张图片").max(9, "最多 9 张图片"),
+  imageIds: z.array(z.string().min(1)).max(9, "最多 9 张图片").default([]),
 });
 
 export const adminUserUpdateSchema = z.object({
   status: z.enum(["ACTIVE", "BANNED"]).optional(),
   role: z.enum(["USER", "ADMIN"]).optional(),
   storageQuotaGB: z.number().min(0.1).max(1024 * 10).optional(),
+  // 管理员重置用户密码（复用注册密码强度校验；超级管理员除外）
+  password: strongPassword.optional(),
 });
 
 // 管理员创建用户：复用注册的邮箱/用户名/密码强度校验
