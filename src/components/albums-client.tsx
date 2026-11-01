@@ -191,9 +191,8 @@ function DailyCard({ daily }: { daily: { total: number; coverUrl: string | null 
           <p className="truncate font-medium">日常记录</p>
           <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[0.6875rem] font-medium text-primary">自动汇总</span>
         </div>
-        <p className="line-clamp-2 min-h-[2rem] text-xs text-muted-foreground">
-          图文动态发布的照片自动汇入这里，每张照片带上传者标记，仅管理员可见
-        </p>
+        {/* 占位：与普通相册卡的描述行等高，保持网格行高一致 */}
+        <p className="min-h-[2rem]" />
       </div>
     </Link>
   );
