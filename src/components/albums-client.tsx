@@ -28,7 +28,7 @@ export function AlbumsClient({ isAdmin }: { isAdmin?: boolean }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Album | null>(null);
   const [deleting, setDeleting] = useState(false);
-  // 日常记录（虚拟相册）：总数与封面取自图片列表接口（管理员=全站，普通用户=本人）
+  // 日常记录（虚拟相册，仅管理员可见）：总数与封面取自图文动态关联的图片列表
   const [daily, setDaily] = useState<{ total: number; coverUrl: string | null } | null>(null);
 
   const load = useCallback(async () => {
@@ -47,7 +47,8 @@ export function AlbumsClient({ isAdmin }: { isAdmin?: boolean }) {
   }, [load]);
 
   useEffect(() => {
-    fetch(`/api/images?scope=${isAdmin ? "admin" : "mine"}&take=1`)
+    if (!isAdmin) return;
+    fetch(`/api/images?scope=admin&posted=1&take=1`)
       .then((r) => r.json())
       .then((json) => {
         if (json.ok) {
@@ -92,8 +93,8 @@ export function AlbumsClient({ isAdmin }: { isAdmin?: boolean }) {
 
       {albums.length === 0 ? (
         <>
-          {/* 日常记录：与普通相册同尺寸的固定卡片 */}
-          <DailyCard daily={daily} isAdmin={isAdmin} />
+          {/* 日常记录：与普通相册同尺寸的固定卡片（仅管理员可见） */}
+          {isAdmin && <DailyCard daily={daily} />}
           <EmptyState
             title="还没有相册"
             description="创建相册来整理你的图片"
@@ -102,8 +103,8 @@ export function AlbumsClient({ isAdmin }: { isAdmin?: boolean }) {
         </>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-          {/* 日常记录：与普通相册同尺寸的固定卡片 */}
-          <DailyCard daily={daily} isAdmin={isAdmin} />
+          {/* 日常记录：与普通相册同尺寸的固定卡片（仅管理员可见） */}
+          {isAdmin && <DailyCard daily={daily} />}
           {albums.map((a) => (
             <div
               key={a.id}
@@ -168,8 +169,8 @@ export function AlbumsClient({ isAdmin }: { isAdmin?: boolean }) {
   );
 }
 
-// 日常记录（虚拟相册）卡片：与普通相册同尺寸，固定在网格首位
-function DailyCard({ daily, isAdmin }: { daily: { total: number; coverUrl: string | null } | null; isAdmin?: boolean }) {
+// 日常记录（虚拟相册）卡片：与普通相册同尺寸，固定在网格首位（仅管理员可见）
+function DailyCard({ daily }: { daily: { total: number; coverUrl: string | null } | null }) {
   return (
     <Link
       href="/albums/daily"
@@ -198,7 +199,7 @@ function DailyCard({ daily, isAdmin }: { daily: { total: number; coverUrl: strin
           <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[0.6875rem] font-medium text-primary">自动汇总</span>
         </div>
         <p className="line-clamp-2 min-h-[2rem] text-xs text-muted-foreground">
-          {isAdmin ? "所有人上传的照片都汇入这里，每张照片带上传者标签" : "你上传的照片都汇入这里，每张照片带上传者标签"}
+          图文动态发布的照片自动汇入这里，每张照片带上传者标记，仅管理员可见
         </p>
       </div>
     </Link>

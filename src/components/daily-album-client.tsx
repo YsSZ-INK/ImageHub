@@ -13,16 +13,16 @@ import { useCursorPager } from "@/lib/use-cursor-pager";
 import { shortDate } from "@/lib/utils";
 import type { ImageDTO } from "@/server/image.service";
 
-// 日常记录（虚拟相册）：自动汇总所有上传的照片，每张照片带「@上传者 · 时间」标签。
-// 管理员看全站照片，普通用户看自己的；照片不搬家，仍保留在各自相册中。
-// 支持筛选：按上传者用户名（管理员）+ 上传时间范围，可组合、可单独使用。
-export function DailyAlbumClient({ isAdmin }: { isAdmin: boolean }) {
-  // 筛选条件：上传者用户名（仅管理员）+ 起止日期；变更后 useCursorPager 自动回第一页
+// 日常记录（虚拟相册，仅管理员可见）：自动汇总所有图文动态发布的照片，每张照片带「@上传者 · 时间」标记。
+// 照片不搬家，仍保留在各自相册中；支持按上传者用户名 + 上传时间范围筛选，可组合、可单独使用。
+export function DailyAlbumClient() {
+  // 筛选条件：上传者用户名 + 起止日期；变更后 useCursorPager 自动回第一页
   const [owner, setOwner] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const { items, page, hasNext, totalPages, loading, loadPage, gotoPage, total } = useCursorPager({
-    scope: isAdmin ? "admin" : "mine",
+    scope: "admin",
+    posted: "1",
     ...(owner ? { owner } : {}),
     ...(from ? { from: new Date(`${from}T00:00:00`).toISOString() } : {}),
     ...(to ? { to: new Date(`${to}T23:59:59.999`).toISOString() } : {}),
@@ -42,9 +42,7 @@ export function DailyAlbumClient({ isAdmin }: { isAdmin: boolean }) {
           </Button>
           <h1 className="text-xl font-bold">日常记录</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {isAdmin
-              ? "自动汇总所有人上传的照片，每张照片都带上传者标签"
-              : "自动汇总你上传的照片，每张照片都带上传者标签"}
+            自动汇总所有图文动态发布的照片，每张照片都带上传者标记
             {total != null ? ` · 共 ${total} 张` : ""}
           </p>
         </div>
@@ -53,14 +51,12 @@ export function DailyAlbumClient({ isAdmin }: { isAdmin: boolean }) {
       {/* 筛选栏：按上传者 + 时间范围，可组合也可单独使用 */}
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Search className="h-4 w-4 text-muted-foreground" />
-        {isAdmin && (
-          <Input
-            value={owner}
-            onChange={(e) => setOwner(e.target.value)}
-            placeholder="按上传者用户名筛选"
-            className="h-9 w-44 text-sm"
-          />
-        )}
+        <Input
+          value={owner}
+          onChange={(e) => setOwner(e.target.value)}
+          placeholder="按上传者用户名筛选"
+          className="h-9 w-44 text-sm"
+        />
         <DateField value={from} onChange={setFrom} />
         <span className="text-sm text-muted-foreground">至</span>
         <DateField value={to} onChange={setTo} />
@@ -74,7 +70,7 @@ export function DailyAlbumClient({ isAdmin }: { isAdmin: boolean }) {
       {items.length === 0 && !loading ? (
         <EmptyState
           title={hasFilter ? "没有符合条件的照片" : "还没有照片"}
-          description={hasFilter ? "换个筛选条件试试" : isAdmin ? "等大家上传照片后自动出现在这里" : "去上传你的第一张照片吧"}
+          description={hasFilter ? "换个筛选条件试试" : "等大家在图文动态里发布照片后自动出现在这里"}
         />
       ) : (
         <>

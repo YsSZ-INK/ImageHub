@@ -324,7 +324,7 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
               <div className="grid w-full grid-cols-5 gap-0.5 border-t bg-muted/50 px-1.5 py-1">
                 <Button
                   variant="outline"
-                  className="inline-flex h-4 w-full items-center justify-center rounded px-0.5 text-[0.625rem] leading-none"
+                  className="inline-flex h-4 w-full items-center justify-center gap-0.5 rounded px-0.5 text-[0.625rem] leading-none"
                   title="外链分享：查看原图并复制链接 / 嵌入代码"
                   onClick={(e) => {
                     e.stopPropagation();

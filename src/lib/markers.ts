@@ -65,7 +65,7 @@ export function slotDisplayName(
 }
 
 export function markerLabel(marker: string): string {
-  if (marker === "local") return "本地磁盘";
+  if (marker === "local") return "本地";
   return "R2";
 }
 

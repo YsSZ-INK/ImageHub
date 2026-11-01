@@ -34,6 +34,8 @@ export const GET = handle(async (req: Request) => {
     owner: url.searchParams.get("owner") ?? undefined,
     from: parseDate(url.searchParams.get("from")),
     to: parseDate(url.searchParams.get("to")),
+    // 日常记录（虚拟相册）：仅统计图文动态关联的图片
+    posted: url.searchParams.get("posted") === "1" ? true : undefined,
   });
   return ok({ items, nextCursor, total });
 });

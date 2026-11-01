@@ -275,6 +275,8 @@ export type ListParams = {
   owner?: string;
   from?: Date;
   to?: Date;
+  // 日常记录（虚拟相册）：仅统计图文动态关联的图片
+  posted?: boolean;
 };
 
 export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; nextCursor: string | null; total: number }> {
@@ -345,6 +347,7 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
 
   // 日常记录筛选：按上传者用户名 + 上传时间范围（可组合、可单独使用；用户名不存在时结果为空）
   if (p.owner) where.user = { name: p.owner };
+  if (p.posted) where.postId = { not: null };
   if (p.from || p.to) {
     where.createdAt = {
       ...(p.from ? { gte: p.from } : {}),

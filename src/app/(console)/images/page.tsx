@@ -11,7 +11,7 @@ export default async function DashboardPage() {
   const albums = await listAlbums(user);
   const s = await getSettings();
   const storages: MarkerOpt[] = [
-    { marker: "local", label: "本地磁盘" },
+    { marker: "local", label: "本地" },
     ...s.r2Slots
       .map((cfg, i) => ({ cfg, i }))
       .filter(({ cfg }) => cfg.accessKeyId && slotConfigured(cfg))
