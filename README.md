@@ -68,7 +68,7 @@
 
 - 注册（密码强度校验 + bcrypt）、登录 / 登出、记住我、邮箱验证、找回密码
 - 个人中心（昵称 / 头像 / 密码 / 配额）、账号注销（级联清理存储）
-- 第一个注册的账号自动成为超级管理员（站长）；存量站点的管理员由数据迁移自动升级
+- **第一个注册的账号自动成为超级管理员（站长）**；超级管理员可在用户管理中把他人设为 / 撤销超级管理员
 
 **后台（两级权限）**
 
@@ -136,16 +136,42 @@ download 接口始终需要登录，不生成匿名直链 / 签名 URL。用户�
 
 ### 安装（一键，推荐）
 
-在服务器上执行一条命令（自动安装 Docker、生成随机密钥、拉取镜像并启动）：
+在服务器上执行一条命令（自动安装 Docker、拉取镜像并启动）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/YsSZ-INK/ImageHub/main/install.sh | bash
 ```
 
-- 非交互执行：站点地址自动取 `http://服务器公网IP:3000`，`AUTH_SECRET` 与数据库密码均随机生成，安装目录默认 `~/ImageHub`
-- 交互执行（直接运行脚本）会依次询问：服务端口、站点地址、端口绑定地址、**安装目录**（输入 `~` 开头路径会自动展开）
-- 需要自定义时先预设变量：`SITE_URL=https://img.example.com PORT=8080 INSTALL_DIR=/opt/ImageHub bash install.sh`
-- **端口默认仅绑定 `127.0.0.1`（只有本机能打开）**；要公网直接访问预设 `BIND_IP=0.0.0.0 bash install.sh`，或安装后在 `.env` 修改（见「端口暴露与防火墙」）
+**交互终端执行时会依次问答 6 项**，全部支持直接回车取默认值：
+
+| # | 问答项 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| 1/6 | 安装目录 | `~/ImageHub` | 输入 `~` 开头路径自动展开 |
+| 2/6 | 服务端口 | `3000` | 自动校验 1-65535 |
+| 3/6 | 端口绑定地址 | `127.0.0.1` | 仅本机（配合反向代理）；`0.0.0.0` 对外网开放 |
+| 4/6 | 站点对外访问地址 | `http://公网IP:端口` | 自动探测公网 IP；反代场景填 `https://img.example.com` |
+| 5/6 | 数据库密码 | 留空自动生成 64 位随机密码 | 至少 8 位，写入 `.env` 的 `POSTGRES_PASSWORD` |
+| 6/6 | 是否启用 Redis | 不启用 | 限流计数落 Redis，多实例或需重启不丢失时建议启用 |
+
+会话密钥 `AUTH_SECRET` 始终自动随机生成（64 位十六进制），不询问、不需手动配置。问答结束后打印配置确认面板再开始安装；安装完成后自动下载 `manage.sh` 管理脚本到安装目录。
+
+**非交互场景**（`curl | bash`、CI、脚本化部署）全部取默认值，或用环境变量预设跳过对应问答：
+
+```bash
+SITE_URL=https://img.example.com PORT=8080 IMAGEHUB_DIR=/opt/ImageHub \
+BIND_IP=0.0.0.0 POSTGRES_PASSWORD=YourPass123 REDIS_ENABLED=1 bash install.sh
+```
+
+| 预设变量 | 对应问答 |
+| --- | --- |
+| `IMAGEHUB_DIR` | 1/6 安装目录 |
+| `PORT` | 2/6 服务端口 |
+| `BIND_IP` | 3/6 端口绑定地址 |
+| `SITE_URL` | 4/6 站点对外访问地址 |
+| `POSTGRES_PASSWORD` | 5/6 数据库密码（不设则随机生成） |
+| `REDIS_ENABLED=1` | 6/6 启用 Redis（写 `REDIS_URL` 并随栈启动 redis 容器） |
+
+- **端口默认仅绑定 `127.0.0.1`（只有本机能打开）**；要公网直接访问问答填 `0.0.0.0`，或安装后 `bash manage.sh expose` 切换（见「端口暴露与防火墙」）
 - 重复执行安全：已有 `.env` 时沿用现有配置，不会覆盖密钥
 
 ### 安装（手动，等价步骤）
@@ -166,7 +192,7 @@ docker compose up -d
 curl http://localhost:3000/api/health   # {"ok":true,"db":"up"}
 ```
 
-默认仅本机可访问（`127.0.0.1`）：在这台机器上打开 `http://localhost:3000`，**注册的第一个账号自动成为管理员**，随后进入 `/admin` 建议关闭开放注册。要让其他设备访问，见「端口暴露与防火墙」或「反向代理与 HTTPS」。
+默认仅本机可访问（`127.0.0.1`）：在这台机器上打开 `http://localhost:3000`，**注册的第一个账号自动成为超级管理员（站长）**，随后进入 `/admin` 建议关闭开放注册。要让其他设备访问，见「端口暴露与防火墙」或「反向代理与 HTTPS」。
 
 ### 可选：启用 Redis
 
@@ -182,12 +208,12 @@ curl http://localhost:3000/api/health   # {"ok":true,"db":"up"}
 **第二层：容器开关（Docker 同栈，可选）**
 
 ```bash
-bash manage.sh redis     # 菜单 13：自动写 .env REDIS_URL 并启动 redis 容器
+bash manage.sh redis     # 菜单 16：自动写 .env REDIS_URL 并启动 redis 容器
 # 或手动：.env 设 REDIS_URL=redis://redis:6379 后
 docker compose --profile redis up -d
 ```
 
-不启用容器时 `docker compose up -d` 只起 web + postgres，无 Redis 依赖。也可以不装容器、直接在站点设置里填一个外部 Redis 地址（如另一台服务器上的实例），效果相同。
+不启用容器时 `docker compose up -d` 只起 web + postgres，无 Redis 依赖。也可以不装容器、直接在站点设置里填一个外部 Redis 地址（如另一台服务器上的实例），效果相同。安装时问答 6/6 选 `y` 可一步到位。
 
 ### 管理脚本（推荐）
 
@@ -197,39 +223,49 @@ docker compose --profile redis up -d
 cd ~/ImageHub && bash manage.sh
 ```
 
-交互菜单覆盖日常运维，也支持子命令直达（如 `bash manage.sh update`）：
+交互菜单覆盖 19 项日常运维，也支持子命令直达（如 `bash manage.sh update`）：
 
-| 菜单 | 功能 |
-| --- | --- |
-| 1 | 更新并清理旧镜像（pull + up -d + image prune） |
-| 2 | 卸载（双重确认，可选保留 backups/） |
-| 3 | 更改端口（自动改 `.env` 并同步 `SITE_URL` 中的端口，重建容器） |
-| 4 | 重置用户密码（邮箱定位，支持随机生成新密码） |
-| 5 | 设为 / 取消管理员 |
-| 6 | 服务 启动 / 停止 / 重启 |
-| 7 | 查看实时日志 |
-| 8 | 备份数据（数据库 pg_dump + 存储卷打包，存入 `backups/`） |
-| 9 | 还原数据（从脚本生成的备份回滚） |
-| 10 | 端口对外开放 / 仅本机 切换（改 `BIND_IP`） |
-| 11 | 清理悬空镜像、查看 Docker 磁盘占用 |
-| 12 | 站点信息（地址 / 绑定 / 容器状态 / 存储占用） |
-| 13 | Redis 启用 / 停用（写 `.env` + 启停 redis 容器，应用侧开关在站点设置） |
+| 菜单 | 功能 | 子命令 |
+| --- | --- | --- |
+| 1 | 更新并清理旧镜像（拉取新镜像 + 重建容器 + 清理本项目旧版本镜像） | `update` |
+| 2 | 卸载（双重确认，可选保留 backups/ 备份文件） | `uninstall` |
+| 3 | 更改端口（自动改 `.env` 并同步 `SITE_URL` 中的端口，重建容器） | `port` |
+| 4 | 修改站点地址（校验 http/https 前缀，找回密码等邮件链接随之更新） | `siteurl` / `url` |
+| 5 | 重置用户密码（邮箱定位，直接回车自动生成 12 位随机密码） | `password` |
+| 6 | 角色管理：设为超级管理员 / 管理员 / 降为普通用户 | `admin` / `role` |
+| 7 | 用户列表（邮箱 / 昵称 / 角色 / 状态 / 图片数 / 注册日期，最多 50 条） | `users` / `list` |
+| 8 | 服务 启动 / 停止 / 重启 | `service` |
+| 9 | 查看实时日志 | `logs` |
+| 10 | 备份数据（数据库 pg_dump + 存储卷打包，存入 `backups/`） | `backup` |
+| 11 | 还原数据（从脚本生成的备份回滚，需配套的存储备份） | `restore` |
+| 12 | 每日自动备份定时任务（crontab 安装 / 移除，默认每天 04:00） | `cron` / `backup-cron` |
+| 13 | 端口对外开放 / 仅本机 切换（改 `BIND_IP` 重建容器） | `expose` |
+| 14 | 清理本项目旧镜像、查看 Docker 磁盘占用 | `cleanup` |
+| 15 | 站点信息（地址 / 绑定 / 容器状态 / 存储占用 / 备份目录） | `info` |
+| 16 | Redis 启用 / 停用（写 `.env` + 启停 redis 容器，应用侧开关在站点设置） | `redis` |
+| 17 | 数据库控制台（进入 PostgreSQL psql 交互终端） | `db` / `psql` |
+| 18 | 拉取新镜像不重启（对比镜像 ID，提示是否有新版本） | `pull` / `check-update` |
+| 19 | 强制重建容器（`up -d --force-recreate`，改完 compose/env 后用） | `recreate` |
 
-> 老版本安装的站点可手动补拉一次：`cd ~/ImageHub && curl -fsSL https://raw.githubusercontent.com/YsSZ-INK/ImageHub/main/manage.sh -o manage.sh && chmod +x manage.sh`
+> 角色管理（菜单 6）撤销超级管理员前会检查站点剩余超管数量：仅剩一个时拒绝操作，保证站点始终至少有一个超级管理员。
+
+> 老版本安装的站点可手动补拉一次：`cd ~/ImageHub && curl -fsSL https://raw.githubusercontent.com/YsSZ-INK/ImageHub/main/manage.sh -o manage.sh && chmod +x manage.sh`；git clone 安装的站点在菜单 1 更新时自动同步最新脚本。
 
 ### 更新
 
-镜像由 CI 自动构建发布，服务器上拉取新镜像重启即可（数据卷不受影响）：
+镜像由 CI 自动构建发布，服务器上一条命令完成升级（数据卷不受影响）：
 
 ```bash
+cd ~/ImageHub && bash manage.sh update
+# 等价手动步骤：
 cd ~/ImageHub && docker compose pull web && docker compose up -d && docker image prune -f
 ```
 
-> 末尾的 `docker image prune -f` 清理被替换下来的旧版本悬空镜像——每次 `pull` 都会留下一个约几百 MB 的旧镜像，Docker 不会自动删除，长期不清理会持续吃掉磁盘空间。该命令只删无标签镜像，不影响运行中的容器与数据卷。
+> 末尾的镜像清理只删被替换下来的本项目旧版本悬空镜像（按仓库路径 / source label 识别），其他项目的镜像与构建缓存不受影响。每次 `pull` 都会留下一个约几百 MB 的旧镜像，Docker 不会自动删除，长期不清理会持续吃掉磁盘空间。
 
 ### 卸载
 
-在项目目录执行一条命令，停止并删除容器、数据卷、镜像与项目文件：
+在安装目录执行一条命令，停止并删除容器、数据卷、镜像与项目文件：
 
 ```bash
 cd ~/ImageHub && docker compose down -v --rmi all; rm -rf ~/ImageHub
@@ -241,7 +277,7 @@ cd ~/ImageHub && docker compose down -v --rmi all; rm -rf ~/ImageHub
 - `--rmi all`：顺带删除本 compose 拉取的镜像（应用镜像、postgres、redis；如其他项目共用同一镜像会被一并删除）
 - `rm -rf`：删除项目目录（含 `.env` 与 `docker-compose.yml`）
 
-> 如需保留数据，卸载前先按「数据持久化与备份」章节备份两个数据卷。
+> 如需保留数据，卸载前先按「数据持久化与备份」章节备份两个数据卷；或直接用菜单 2 卸载（双重确认，可选保留 backups/）。
 
 ## 环境变量
 
@@ -251,6 +287,7 @@ cd ~/ImageHub && docker compose down -v --rmi all; rm -rf ~/ImageHub
 | --- | --- | --- |
 | `SITE_URL` | ✅ | 站点对外地址（用于生成站内链接），如 `https://img.example.com` |
 | `AUTH_SECRET` | ✅ | 会话加密密钥，`openssl rand -base64 32` 生成，≥32 字符 |
+| `POSTGRES_PASSWORD` | Docker 部署 | 数据库密码，install.sh 问答生成；compose 据此拼接 `DATABASE_URL` |
 | `DATABASE_URL` | ✅ | 本地开发 `file:./dev.db`；Docker 部署由 compose 注入 PostgreSQL |
 | `BIND_IP` | - | 端口绑定地址，默认 `127.0.0.1` 仅本机；`0.0.0.0` 对外网开放（见「端口暴露与防火墙」） |
 | `PORT` | - | 宿主机监听端口，默认 3000 |
@@ -276,7 +313,7 @@ Docker 发布端口**不走系统防火墙**，这是 Docker 的设计而非防�
 | `127.0.0.1`（默认） | 端口只在回环监听，**无论防火墙如何，外网都打不开** | 本机使用 / 反向代理（推荐） |
 | `0.0.0.0` | 监听所有网卡，外网可直接访问 | 确认要裸暴露时（建议配防火墙/安全组限源） |
 
-切换方式：编辑 `.env`（或安装时预设环境变量），然后 `docker compose up -d` 重建容器：
+切换方式：编辑 `.env`（或安装问答 3/6 直接选），然后 `docker compose up -d` 重建容器：
 
 ```bash
 # 对外网开放
@@ -285,7 +322,7 @@ BIND_IP=0.0.0.0 docker compose up -d
 BIND_IP=127.0.0.1 docker compose up -d
 ```
 
-公网部署推荐保持默认 `127.0.0.1`，用反向代理对外提供 80/443 与 HTTPS，应用端口不出主机。
+也可以 `bash manage.sh expose` 交互切换（菜单 13）。公网部署推荐保持默认 `127.0.0.1`，用反向代理对外提供 80/443 与 HTTPS，应用端口不出主机。
 
 ## 反向代理与 HTTPS
 
@@ -318,7 +355,14 @@ docker run --rm -v imagehub_storage_data:/data -v $PWD:/backup alpine tar czf /b
 
 恢复：先 `docker compose down`，还原两个卷后 `docker compose up -d`。
 
-站点设置内置「备份 / 还原」：管理员可一键下载整包备份（数据库 + 全部存储文件，tar.gz），或上传备份整包还原。
+站点设置内置「备份 / 还原」：超级管理员可一键下载整包备份（数据库 + 全部存储文件，tar.gz），或上传备份整包还原。
+
+**服务器侧备份（推荐）**：
+
+```bash
+bash manage.sh backup    # 菜单 10：数据库 + 存储打包到 backups/，带时间戳
+bash manage.sh cron      # 菜单 12：安装每天 04:00 自动备份的 crontab（日志写 backups/backup.log）
+```
 
 ### 常用命令
 
@@ -344,9 +388,15 @@ docker compose logs web --tail 100 | grep -A 4 "邮件预览"
 
 3. 浏览器打开日志里的 `https://<SITE_URL>/reset-password?token=...` 设置新密码
 
-> 前提：`.env` 的 `SITE_URL` 已配置为真实对外地址，否则手动把链接主机部分改成 `服务器IP:3000`。
+> 前提：`.env` 的 `SITE_URL` 已配置为真实对外地址，否则手动把链接主机部分改成 `服务器IP:3000`（或 `bash manage.sh siteurl` 修改）。
 
-**方式二：直接改数据库（邮件流程不可用时兜底）**
+**方式二：管理脚本重置（最简单）**
+
+```bash
+bash manage.sh password   # 菜单 5：输入邮箱，回车自动生成随机密码
+```
+
+**方式三：直接改数据库（邮件流程不可用时兜底）**
 
 ```bash
 # 1. 用应用容器里的 bcryptjs 生成新密码哈希（把 NewPass123 换成新密码）
@@ -406,6 +456,8 @@ imagehub/
 │   ├── server/                # 业务逻辑（image / storage / migration / chunk-upload 等服务）
 │   ├── lib/                   # 会话 / zod 校验 / 存储驱动 / 分片与缩略图缓存 / 限流
 │   └── middleware.ts          # ink-bg cookie 会话固定背景图
+├── install.sh                 # 一键安装脚本（交互问答）
+├── manage.sh                  # 站点管理脚本（19 项菜单 + 子命令）
 ├── Dockerfile                 # 多阶段构建（deps → build → runner）
 └── docker-compose.yml         # web + postgres（可选 redis profile）
 ```
@@ -417,6 +469,7 @@ imagehub/
 | `/feed` | 图文动态 | 登录 |
 | `/images`、`/images/[id]` | 我的图片 / 图片详情 | 登录（详情按可见性） |
 | `/albums`、`/albums/[id]` | 相册管理 / 相册页 | 登录（按可见性） |
+| `/albums/daily` | 日常记录（动态照片汇总） | 管理员（ADMIN / SUPERADMIN） |
 | `/trash` | 回收站 | 登录 |
 | `/settings` | 个人中心（含图片访问授权审批） | 登录 |
 | `/users` | 交换图片（授权用户切换浏览 + 用户目录申请） | 登录 |

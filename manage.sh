@@ -6,8 +6,9 @@
 #   bash manage.sh          # 进入交互菜单
 #   bash manage.sh update   # 直接执行子命令（可省略菜单）
 #
-# 子命令：update | uninstall | port | password | admin | service
-#         | logs | backup | restore | expose | cleanup | info | redis
+# 子命令：update | uninstall | port | siteurl | password | admin(role)
+#         | users | service | logs | backup | restore | cron | expose
+#         | cleanup | info | redis | db | pull | recreate
 # ============================================================
 set -euo pipefail
 
@@ -51,6 +52,7 @@ wait_health() {
 #   1) ghcr 拉取的镜像：更新后旧版失去 tag 成为悬空镜像，其 RepoDigests 仍含本仓库路径
 #   2) 本地 compose build 的镜像：通过 Dockerfile 中的 source label 识别
 IMAGE_REPO="yssz-ink/imagehub"
+IMAGE_REF="ghcr.io/${IMAGE_REPO}:latest"
 IMAGE_LABEL_KEY="org.opencontainers.image.source"
 IMAGE_LABEL_VAL="https://github.com/YsSZ-INK/ImageHub"
 
@@ -144,25 +146,42 @@ do_uninstall() {
 # ---------- 3. 更改端口 ----------
 do_port() {
   echo "当前端口：${PORT}（绑定地址 ${BIND_IP}）"
-  read -rp "请输入新端口 [3000-65535]：" np || np=""
+  read -rp "请输入新端口 [1-65535]：" np || np=""
   case "$np" in ''|*[!0-9]*) err "端口必须是数字" ;; esac
-  [ "$np" -ge 3000 ] && [ "$np" -le 65535 ] || err "端口需在 3000-65535 之间"
+  [ "$np" -ge 1 ] && [ "$np" -le 65535 ] || err "端口需在 1-65535 之间"
   sed -i.bak "s/^PORT=.*/PORT=\"${np}\"/" .env && rm -f .env.bak
+  grep -qE '^PORT=' .env || printf 'PORT="%s"\n' "$np" >> .env
   # SITE_URL 若带旧端口则同步替换
-  if [ -n "$SITE_URL" ] && printf '%s' "$SITE_URL" | grep -q ":${PORT}$"; then
+  if [ -n "$SITE_URL" ] && printf '%s' "$SITE_URL" | grep -qE ":[0-9]+$"; then
     sed -i.bak "s|:${PORT}$|:${np}|" .env && rm -f .env.bak
-    log "SITE_URL 已同步为 $(grep -E '^SITE_URL=' .env)"
+    log "SITE_URL 已同步为 $(get_env SITE_URL)"
   fi
   log "应用新端口（重建 web 容器）…"
   dc up -d
   if wait_health "$np"; then
-    log "端口已改为 ${np}：$(printf '%s' "$SITE_URL" | sed "s/:${PORT}$/:${np}/")"
+    log "端口已改为 ${np}"
   else
     warn "健康检查超时，请查看日志：bash manage.sh logs"
   fi
 }
 
-# ---------- 4. 重置密码 ----------
+# ---------- 4. 修改站点地址 ----------
+do_siteurl() {
+  echo "当前站点地址：${SITE_URL:-（未配置）}"
+  read -rp "新地址（含 http:// 或 https://）：" nu || nu=""
+  case "$nu" in http://*|https://*) ;; *) err "地址需以 http:// 或 https:// 开头" ;; esac
+  sed -i.bak "s|^SITE_URL=.*|SITE_URL=\"${nu}\"|" .env && rm -f .env.bak
+  grep -qE '^SITE_URL=' .env || printf 'SITE_URL="%s"\n' "$nu" >> .env
+  log "应用新地址（重建 web 容器）…"
+  dc up -d
+  if wait_health "$PORT"; then
+    log "站点地址已改为 ${nu}（找回密码等站内邮件链接将使用新地址）"
+  else
+    warn "健康检查超时，请查看日志：bash manage.sh logs"
+  fi
+}
+
+# ---------- 5. 重置密码 ----------
 do_password() {
   read -rp "要重置密码的用户邮箱：" email || email=""
   [ -n "$email" ] || err "邮箱不能为空"
@@ -181,24 +200,46 @@ do_password() {
     || err "重置失败，请检查邮箱是否存在（区分大小写）"
 }
 
-# ---------- 5. 管理员设置 ----------
+# ---------- 6. 角色管理（超级管理员 / 管理员 / 普通用户） ----------
 do_admin() {
   read -rp "用户邮箱：" email || email=""
   email="${email//\'/}"
   [ -n "$email" ] || err "邮箱不能为空"
-  echo "1) 设为管理员  2) 取消管理员"
-  read -rp "选择 [1-2]：" c || c=""
+  echo "1) 设为超级管理员（站长级，全部权限）"
+  echo "2) 设为管理员（内容管理：审核 / 统计 / 删违规）"
+  echo "3) 降为普通用户"
+  read -rp "选择 [1-3]：" c || c=""
   case "$c" in
-    1) ROLE="ADMIN" ;;
-    2) ROLE="USER" ;;
+    1) ROLE="SUPERADMIN" ;;
+    2) ROLE="ADMIN" ;;
+    3) ROLE="USER" ;;
     *) err "无效选择" ;;
   esac
+  # 保护：撤销超级管理员前，确认站点还有其他超级管理员（至少保留一个）
+  if [ "$ROLE" != "SUPERADMIN" ]; then
+    local is_super total
+    is_super="$(dc exec -T postgres psql -U imagehub -d imagehub -tAc "SELECT COUNT(*) FROM \"User\" WHERE role = 'SUPERADMIN' AND email = '${email}';" | tr -d '[:space:]')"
+    if [ "$is_super" = "1" ]; then
+      total="$(dc exec -T postgres psql -U imagehub -d imagehub -tAc "SELECT COUNT(*) FROM \"User\" WHERE role = 'SUPERADMIN';" | tr -d '[:space:]')"
+      [ "${total:-0}" -le 1 ] && err "站点至少保留一个超级管理员：请先把其他人设为超级管理员"
+    fi
+  fi
   dc exec -T postgres psql -U imagehub -d imagehub -c "UPDATE \"User\" SET role = '${ROLE}' WHERE email = '${email}';" \
-    && log "已将 ${email} 设为 ${ROLE}" \
+    && log "已将 ${email} 设为 ${ROLE}（对方重新登录后生效）" \
     || err "操作失败，请检查邮箱是否存在"
 }
 
-# ---------- 6. 服务控制 ----------
+# ---------- 7. 用户列表 ----------
+do_users() {
+  echo "──────────── 用户列表（最多 50 条，新注册在前）────────────"
+  dc exec -T postgres psql -U imagehub -d imagehub -P pager=off -c \
+    "SELECT email, name, role, status,
+            (SELECT COUNT(*) FROM \"Image\" i WHERE i.\"userId\" = u.id AND i.\"deletedAt\" IS NULL) AS images,
+            to_char(\"createdAt\", 'YYYY-MM-DD') AS registered
+     FROM \"User\" u ORDER BY \"createdAt\" DESC LIMIT 50;"
+}
+
+# ---------- 8. 服务控制 ----------
 do_service() {
   echo "1) 启动  2) 停止  3) 重启"
   read -rp "选择 [1-3]：" c || c=""
@@ -210,12 +251,12 @@ do_service() {
   esac
 }
 
-# ---------- 7. 日志 ----------
+# ---------- 9. 日志 ----------
 do_logs() {
   dc logs -f web --tail 100
 }
 
-# ---------- 8. 备份 ----------
+# ---------- 10. 备份 ----------
 do_backup() {
   local ts; ts="$(date +%Y%m%d-%H%M%S)"
   log "导出数据库 …"
@@ -229,7 +270,7 @@ do_backup() {
   warn "建议同时把备份文件下载到本机保存"
 }
 
-# ---------- 9. 还原 ----------
+# ---------- 11. 还原 ----------
 do_restore() {
   [ -d "$BACKUP_DIR" ] && ls "$BACKUP_DIR"/db-*.sql.gz >/dev/null 2>&1 || err "backups/ 中没有本脚本生成的备份"
   echo "可用备份（按时间倒序）："
@@ -262,7 +303,25 @@ do_restore() {
   if wait_health "$PORT"; then log "还原完成：http://127.0.0.1:${PORT}"; else warn "健康检查超时，请查看日志"; fi
 }
 
-# ---------- 10. 对外开放 / 仅本机 ----------
+# ---------- 12. 每日自动备份定时任务 ----------
+do_cron() {
+  if crontab -l 2>/dev/null | grep -qF "manage.sh backup"; then
+    log "已存在每日自动备份任务："
+    crontab -l | grep -F "manage.sh backup"
+    if confirm "移除该定时任务？"; then
+      crontab -l | grep -vF "manage.sh backup" | crontab -
+      log "已移除自动备份任务"
+    fi
+    return
+  fi
+  warn "将在系统 crontab 安装：每天 04:00 执行 bash manage.sh backup（数据库 + 图片，存入 backups/，日志 backups/backup.log）"
+  [ -n "$SUDO" ] && warn "当前 docker 需要 sudo：请确保该用户 sudo 免密，否则 cron 中的备份会失败"
+  confirm "安装每日自动备份？" || { log "已取消"; return; }
+  ( crontab -l 2>/dev/null; echo "0 4 * * * cd ${INSTALL_DIR} && bash manage.sh backup >> ${BACKUP_DIR}/backup.log 2>&1" ) | crontab -
+  log "已安装：每天 04:00 自动备份（crontab -l 可查看）"
+}
+
+# ---------- 13. 对外开放 / 仅本机 ----------
 do_expose() {
   echo "当前绑定地址：${BIND_IP}"
   echo "1) 仅本机可访问（127.0.0.1，推荐配合反向代理）"
@@ -279,7 +338,7 @@ do_expose() {
   log "已应用：绑定地址 ${NEW}"
 }
 
-# ---------- 11. 清理 ----------
+# ---------- 14. 清理 ----------
 do_cleanup() {
   log "清理本项目旧版本镜像（其他项目不受影响）…"
   prune_project_images
@@ -287,7 +346,7 @@ do_cleanup() {
   ${SUDO} docker system df
 }
 
-# ---------- 12. 站点信息 ----------
+# ---------- 15. 站点信息 ----------
 do_info() {
   echo "──────────── ImageHub 站点信息 ────────────"
   echo "  安装目录：$INSTALL_DIR"
@@ -305,7 +364,7 @@ do_info() {
   echo "────────────────────────────────────────────"
 }
 
-# ---------- 13. Redis 启用 / 停用 ----------
+# ---------- 16. Redis 启用 / 停用 ----------
 # 两层开关：本菜单管 redis 容器起没起；站点设置里的「Redis 缓存」开关管应用用不用。
 # 任一层关闭，限流都会自动降级为进程内存，不影响站点运行。
 do_redis() {
@@ -342,6 +401,37 @@ do_redis() {
   esac
 }
 
+# ---------- 17. 数据库控制台 ----------
+do_db() {
+  log "进入 PostgreSQL 控制台（\\q 退出）常用表：\"User\" / \"Image\" / \"Album\" / \"Post\""
+  dc exec postgres psql -U imagehub -d imagehub
+}
+
+# ---------- 18. 拉取新镜像（不重启） ----------
+do_pull() {
+  local old_id new_id
+  old_id="$(${SUDO} docker image inspect "$IMAGE_REF" --format '{{.Id}}' 2>/dev/null || true)"
+  log "拉取最新镜像（仅下载，不影响运行中的服务）…"
+  dc pull web
+  new_id="$(${SUDO} docker image inspect "$IMAGE_REF" --format '{{.Id}}' 2>/dev/null || true)"
+  if [ -n "$old_id" ] && [ "$old_id" = "$new_id" ]; then
+    log "当前已是最新版本，无需更新"
+  else
+    warn "已下载新版本镜像。执行 bash manage.sh update（或 recreate）应用更新"
+  fi
+}
+
+# ---------- 19. 强制重建容器 ----------
+do_recreate() {
+  confirm "强制重建容器（应用 .env 与 compose 的最新配置，数据不受影响）？" || { log "已取消"; return; }
+  dc up -d --force-recreate
+  if wait_health "$PORT"; then
+    log "容器已重建：http://127.0.0.1:${PORT}"
+  else
+    warn "健康检查超时，请查看日志：bash manage.sh logs"
+  fi
+}
+
 # ---------- 菜单 ----------
 menu() {
   while true; do
@@ -350,32 +440,44 @@ menu() {
     echo "  1) 更新并清理旧镜像"
     echo "  2) 卸载（删除全部数据）"
     echo "  3) 更改端口"
-    echo "  4) 重置用户密码"
-    echo "  5) 设为 / 取消管理员"
-    echo "  6) 服务 启动 / 停止 / 重启"
-    echo "  7) 查看实时日志"
-    echo "  8) 备份数据（数据库 + 图片）"
-    echo "  9) 还原数据（从备份）"
-    echo " 10) 端口对外开放 / 仅本机 切换"
-    echo " 11) 清理本项目旧镜像与查看磁盘占用"
-    echo " 12) 站点信息"
-    echo " 13) Redis 启用 / 停用"
+    echo "  4) 修改站点地址"
+    echo "  5) 重置用户密码"
+    echo "  6) 角色管理（超级管理员 / 管理员 / 普通用户）"
+    echo "  7) 用户列表"
+    echo "  8) 服务 启动 / 停止 / 重启"
+    echo "  9) 查看实时日志"
+    echo " 10) 备份数据（数据库 + 图片）"
+    echo " 11) 还原数据（从备份）"
+    echo " 12) 每日自动备份定时任务（安装 / 移除）"
+    echo " 13) 端口对外开放 / 仅本机 切换"
+    echo " 14) 清理本项目旧镜像与查看磁盘占用"
+    echo " 15) 站点信息"
+    echo " 16) Redis 启用 / 停用"
+    echo " 17) 数据库控制台（psql）"
+    echo " 18) 拉取新镜像（不重启，检查是否有新版本）"
+    echo " 19) 强制重建容器"
     echo "  0) 退出"
-    read -rp "请选择 [0-13]：" c || exit 0
+    read -rp "请选择 [0-19]：" c || exit 0
     case "$c" in
       1) do_update ;;
       2) do_uninstall ;;
       3) do_port ;;
-      4) do_password ;;
-      5) do_admin ;;
-      6) do_service ;;
-      7) do_logs ;;
-      8) do_backup ;;
-      9) do_restore ;;
-      10) do_expose ;;
-      11) do_cleanup ;;
-      12) do_info ;;
-      13) do_redis ;;
+      4) do_siteurl ;;
+      5) do_password ;;
+      6) do_admin ;;
+      7) do_users ;;
+      8) do_service ;;
+      9) do_logs ;;
+      10) do_backup ;;
+      11) do_restore ;;
+      12) do_cron ;;
+      13) do_expose ;;
+      14) do_cleanup ;;
+      15) do_info ;;
+      16) do_redis ;;
+      17) do_db ;;
+      18) do_pull ;;
+      19) do_recreate ;;
       0|"") exit 0 ;;
       *) warn "无效选择" ;;
     esac
@@ -387,16 +489,22 @@ case "${1:-}" in
   update) do_update ;;
   uninstall) do_uninstall ;;
   port) do_port ;;
+  siteurl|url) do_siteurl ;;
   password) do_password ;;
-  admin) do_admin ;;
+  admin|role) do_admin ;;
+  users|list) do_users ;;
   service) do_service ;;
   logs) do_logs ;;
   backup) do_backup ;;
   restore) do_restore ;;
+  cron|backup-cron) do_cron ;;
   expose) do_expose ;;
   cleanup) do_cleanup ;;
   info) do_info ;;
   redis) do_redis ;;
+  db|psql) do_db ;;
+  pull|check-update) do_pull ;;
+  recreate) do_recreate ;;
   "") menu ;;
-  *) err "未知命令：$1（可用：update/uninstall/port/password/admin/service/logs/backup/restore/expose/cleanup/info/redis）" ;;
+  *) err "未知命令：$1（可用：update/uninstall/port/siteurl/password/admin/users/service/logs/backup/restore/cron/expose/cleanup/info/redis/db/pull/recreate）" ;;
 esac
