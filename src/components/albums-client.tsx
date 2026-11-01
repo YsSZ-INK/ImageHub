@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { Plus, Loader2, Trash2, Pencil, FolderOpen, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AlbumFormDialog } from "@/components/album-form-dialog";
-import { EmptyState } from "@/components/image-grid";
 import { VisibilityBadge } from "@/components/image-actions";
 
 type Album = {
@@ -148,10 +147,6 @@ export function AlbumsClient({ isAdmin }: { isAdmin?: boolean }) {
           ))}
       </div>
 
-      {albums.length === 0 && (
-        <EmptyState title="还没有相册" description="点击右上角「新建相册」来整理你的图片" />
-      )}
-
       <AlbumFormDialog
         open={open}
         onOpenChange={setOpen}
@@ -191,8 +186,9 @@ function DailyCard({ daily }: { daily: { total: number; coverUrl: string | null 
           <p className="truncate font-medium">日常记录</p>
           <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[0.6875rem] font-medium text-primary">自动汇总</span>
         </div>
-        {/* 占位：与普通相册卡的描述行等高，保持网格行高一致 */}
-        <p className="min-h-[2rem]" />
+        <p className="line-clamp-2 min-h-[2rem] text-xs text-muted-foreground">
+          图文动态发布的照片自动汇入这里，每张照片带上传者标记，仅管理员可见
+        </p>
       </div>
     </Link>
   );
