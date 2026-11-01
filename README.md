@@ -231,7 +231,7 @@ cd ~/ImageHub && bash manage.sh
 | 2 | 卸载（双重确认，可选保留 backups/ 备份文件） | `uninstall` |
 | 3 | 更改端口（自动改 `.env` 并同步 `SITE_URL` 中的端口，重建容器） | `port` |
 | 4 | 修改站点地址（校验 http/https 前缀，找回密码等邮件链接随之更新） | `siteurl` / `url` |
-| 5 | 重置用户密码（邮箱定位，直接回车自动生成 12 位随机密码） | `password` |
+| 5 | 重置用户密码（邮箱定位，一键重置为默认密码 `Admin123456`） | `password` |
 | 6 | 角色管理：设为超级管理员 / 管理员 / 降为普通用户 | `admin` / `role` |
 | 7 | 用户列表（邮箱 / 昵称 / 角色 / 状态 / 图片数 / 注册日期，最多 50 条） | `users` / `list` |
 | 8 | 服务 启动 / 停止 / 重启 | `service` |
@@ -393,8 +393,10 @@ docker compose logs web --tail 100 | grep -A 4 "邮件预览"
 **方式二：管理脚本重置（最简单）**
 
 ```bash
-bash manage.sh password   # 菜单 5：输入邮箱，回车自动生成随机密码
+bash manage.sh password   # 菜单 5：输入邮箱，重置为默认密码 Admin123456
 ```
+
+> 默认密码较为常见，重置后请尽快登录在「个人中心 → 修改密码」改成新密码。
 
 **方式三：直接改数据库（邮件流程不可用时兜底）**
 

@@ -186,17 +186,10 @@ do_password() {
   read -rp "要重置密码的用户邮箱：" email || email=""
   [ -n "$email" ] || err "邮箱不能为空"
   email="${email//\'/}"
-  read -rp "新密码（直接回车自动生成 12 位随机密码）：" -s npass || npass=""
-  echo
-  if [ -z "$npass" ]; then
-    npass="$(head -c 16 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 12)"
-    log "已生成随机密码"
-  fi
-  [ "${#npass}" -ge 8 ] || err "密码至少 8 位"
   log "生成密码哈希 …"
-  HASH="$(dc exec -T web node -e "console.log(require('bcryptjs').hashSync(process.argv[1], 12))" "$npass")"
+  HASH="$(dc exec -T web node -e "console.log(require('bcryptjs').hashSync(process.argv[1], 12))" "Admin123456")"
   dc exec -T postgres psql -U imagehub -d imagehub -c "UPDATE \"User\" SET \"passwordHash\" = '${HASH}' WHERE email = '${email}';" \
-    && log "密码已重置：${email} 新密码：${npass}" \
+    && { log "密码已重置：${email} 新密码：Admin123456"; warn "默认密码较为常见，请通知该用户登录后立即在个人中心修改"; } \
     || err "重置失败，请检查邮箱是否存在（区分大小写）"
 }
 
