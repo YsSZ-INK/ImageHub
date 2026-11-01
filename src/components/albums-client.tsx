@@ -91,21 +91,11 @@ export function AlbumsClient({ isAdmin }: { isAdmin?: boolean }) {
         </Button>
       </div>
 
-      {albums.length === 0 ? (
-        <>
-          {/* 日常记录：与普通相册同尺寸的固定卡片（仅管理员可见） */}
-          {isAdmin && <DailyCard daily={daily} />}
-          <EmptyState
-            title="还没有相册"
-            description="创建相册来整理你的图片"
-            action={<Button onClick={() => { setEditing(null); setOpen(true); }}>新建相册</Button>}
-          />
-        </>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-          {/* 日常记录：与普通相册同尺寸的固定卡片（仅管理员可见） */}
-          {isAdmin && <DailyCard daily={daily} />}
-          {albums.map((a) => (
+      {/* 网格统一渲染：日常记录卡片与普通相册同格，避免只剩日常记录时布局跳变 */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        {/* 日常记录：与普通相册同尺寸的固定卡片（仅管理员可见） */}
+        {isAdmin && <DailyCard daily={daily} />}
+        {albums.map((a) => (
             <div
               key={a.id}
               className="group overflow-hidden rounded-xl border border-foreground/10 bg-background/55 backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-lg hover:shadow-foreground/10"
@@ -156,7 +146,14 @@ export function AlbumsClient({ isAdmin }: { isAdmin?: boolean }) {
               </div>
             </div>
           ))}
-        </div>
+      </div>
+
+      {albums.length === 0 && (
+        <EmptyState
+          title="还没有相册"
+          description="创建相册来整理你的图片"
+          action={<Button onClick={() => { setEditing(null); setOpen(true); }}>新建相册</Button>}
+        />
       )}
 
       <AlbumFormDialog

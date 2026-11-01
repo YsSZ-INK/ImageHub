@@ -54,10 +54,10 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
   const [loadingMore, setLoadingMore] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const fmtLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  // 时间筛选（YYYY-MM-DD）：默认今天
-  const [from, setFrom] = useState(() => fmtLocal(new Date()));
-  const [to, setTo] = useState(() => fmtLocal(new Date()));
-  const [preset, setPreset] = useState<string | null>("今天");
+  // 时间筛选（YYYY-MM-DD）：默认不筛选 = 显示全部动态（按发布时间新→旧从上往下排列）
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [preset, setPreset] = useState<string | null>(null);
   // 快捷时间区间：一键选定，免去手动输入日期；再点一次取消
   const PRESETS: { label: string; days: number }[] = [
     { label: "今天", days: 0 },
@@ -92,8 +92,9 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
       try {
         const p = new URLSearchParams();
         if (c) p.set("cursor", c);
-        if (f) p.set("from", new Date(`${f}T00:00:00`).toISOString());
-        if (t) p.set("to", new Date(`${t}T23:59:59.999`).toISOString());
+        // 非法日期值直接忽略该筛选条件，避免客户端抛异常或发出无效请求
+        if (f && !isNaN(new Date(`${f}T00:00:00`).getTime())) p.set("from", new Date(`${f}T00:00:00`).toISOString());
+        if (t && !isNaN(new Date(`${t}T23:59:59.999`).getTime())) p.set("to", new Date(`${t}T23:59:59.999`).toISOString());
         const qs = p.toString();
         const res = await fetch(`/api/posts${qs ? `?${qs}` : ""}`);
         const json = await res.json();
@@ -102,6 +103,8 @@ export function FeedClient({ me }: { me: { name: string; avatarUrl: string | nul
           setCursor(json.data.nextCursor);
           setHasMore(Boolean(json.data.nextCursor));
         } else toast.error(json.error);
+      } catch {
+        toast.error("加载动态失败，请重试");
       } finally {
         setLoading(false);
         setLoadingMore(false);
