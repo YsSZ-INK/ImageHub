@@ -149,11 +149,7 @@ export function AlbumsClient({ isAdmin }: { isAdmin?: boolean }) {
       </div>
 
       {albums.length === 0 && (
-        <EmptyState
-          title="还没有相册"
-          description="创建相册来整理你的图片"
-          action={<Button onClick={() => { setEditing(null); setOpen(true); }}>新建相册</Button>}
-        />
+        <EmptyState title="还没有相册" description="点击右上角「新建相册」来整理你的图片" />
       )}
 
       <AlbumFormDialog
