@@ -360,8 +360,8 @@ export function AdminUsersClient() {
                           <ShieldCheck className="h-3 w-3" /> 解封
                         </Button>
                       )}
-                      {/* 超级管理员不可降级：隐藏按钮 */}
-                      {!u.isSuperAdmin && (
+                      {/* 角色变更：用户↔管理员 与 设为/取消超级管理员（超管页专属能力，不能对自己操作） */}
+                      {!u.isSelf && u.role !== "SUPERADMIN" && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -375,8 +375,26 @@ export function AdminUsersClient() {
                           {u.role === "ADMIN" ? "降级" : "设管理员"}
                         </Button>
                       )}
-                      {/* 重置密码：所有用户均可（超级管理员除外），弹窗输入新密码 */}
-                      {!u.isSuperAdmin && (
+                      {!u.isSelf && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={updating === u.id}
+                          onClick={() => {
+                            const msg =
+                              u.role === "SUPERADMIN"
+                                ? `确定撤销 ${u.name} 的超级管理员身份（降为管理员）？`
+                                : `确定将 ${u.name} 设为超级管理员？`;
+                            if (!confirm(msg)) return;
+                            update(u.id, { role: u.role === "SUPERADMIN" ? "ADMIN" : "SUPERADMIN" });
+                          }}
+                        >
+                          <Crown className="h-3 w-3" />
+                          {u.role === "SUPERADMIN" ? "取消超管" : "设为超管"}
+                        </Button>
+                      )}
+                      {/* 重置密码：可重置任何人的密码（自己走个人中心修改），弹窗输入新密码 */}
+                      {!u.isSelf && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -450,6 +468,7 @@ export function AdminUsersClient() {
                 <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
                   <option value="USER">普通用户</option>
                   <option value="ADMIN">管理员</option>
+                  <option value="SUPERADMIN">超级管理员</option>
                 </Select>
               </div>
               <div className="space-y-1.5">

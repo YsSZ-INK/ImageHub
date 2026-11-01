@@ -71,15 +71,16 @@ export const postCreateSchema = z.object({
 
 export const adminUserUpdateSchema = z.object({
   status: z.enum(["ACTIVE", "BANNED"]).optional(),
-  role: z.enum(["USER", "ADMIN"]).optional(),
+  // 仅超级管理员可调用本接口，故可授予/撤销 SUPERADMIN（服务端保证站点至少保留一个）
+  role: z.enum(["USER", "ADMIN", "SUPERADMIN"]).optional(),
   storageQuotaGB: z.number().min(0.1).max(1024 * 10).optional(),
-  // 管理员重置用户密码（复用注册密码强度校验；超级管理员除外）
+  // 管理员重置用户密码（复用注册密码强度校验）
   password: strongPassword.optional(),
 });
 
 // 管理员创建用户：复用注册的邮箱/用户名/密码强度校验
 export const adminUserCreateSchema = registerSchema.extend({
-  role: z.enum(["USER", "ADMIN"]).default("USER"),
+  role: z.enum(["USER", "ADMIN", "SUPERADMIN"]).default("USER"),
   storageQuotaGB: z.number().min(0.1).max(1024 * 10).optional(),
 });
 
