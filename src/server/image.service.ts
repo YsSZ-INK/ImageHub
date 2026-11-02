@@ -130,17 +130,6 @@ export async function invalidateImageView(...ids: string[]) {
   await invalidateJson(...ids.map((id) => `imgview:${id}`));
 }
 
-// 重新提交审核：仅本人/管理员，图片回到待审核状态（从画廊、公开直链与动态中隐藏）
-export async function requestReview(id: string, viewer: Viewer): Promise<ImageDTO> {
-  const img = await prisma.image.findUnique({ where: { id } });
-  if (!img || img.deletedAt) throw new AppError("图片不存在", 404);
-  if (img.userId !== viewer.id && !isAdminRole(viewer.role)) throw new AppError("无权操作该图片", 403);
-  if (img.status === "PENDING") return toDTO(img);
-  const updated = await prisma.image.update({ where: { id }, data: { status: "PENDING" } });
-  await invalidateImageView(id);
-  return toDTO(updated);
-}
-
 // 审核通过（管理员）：待审核图片进入画廊
 export async function approveImage(id: string, viewer: Viewer): Promise<ImageDTO> {
   if (!isAdminRole(viewer.role)) throw new AppError("无权限", 403);

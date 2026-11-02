@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown, ZoomIn, Play, RotateCcw, Images, ImageOff, Copy } from "lucide-react";
+import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown, ZoomIn, Play, Images, ImageOff, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { ImageGrid, EmptyState } from "@/components/image-grid";
@@ -93,17 +93,6 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
   async function batchDelete() {
     if (!confirm(`确定把选中的 ${selected.size} 张图片移入回收站？`)) return;
     await runBatch("delete");
-  }
-
-  // 重新审核：图片回到待审核队列，管理员通过前从画廊与公开外链中隐藏
-  async function reReview(id: string) {
-    if (!confirm("重新提交审核？审核通过前，该图片将从画廊与公开外链中隐藏。")) return;
-    const res = await fetch(`/api/images/${id}/review`, { method: "POST" });
-    const json = await res.json();
-    if (json.ok) {
-      toast.success("已提交重新审核");
-      loadPage(page);
-    } else toast.error(json.error);
   }
 
   // 跨页全选：拉取当前筛选下全部图片 id（含未加载页）
@@ -244,25 +233,23 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
             </Button>
           </div>
 
+          {/* 小字提醒：点图中央是放大细观（灯箱），点图其余处是选中 */}
+          <p className="text-xs text-muted-foreground">轻点图片中央，细观全貌；点其四周，即为选中</p>
+
           {/* 带复选框的网格 */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
             {items.map((img, idx) => (
               <div key={img.id} className="group overflow-hidden rounded-lg border border-border">
                 <div className="relative">
                 {img.kind === "video" ? (
-                  <>
-                    <video
-                      src={img.rawUrl}
-                      preload="metadata"
-                      muted
-                      playsInline
-                      className="aspect-square w-full cursor-pointer bg-muted object-cover"
-                      onClick={() => toggle(img.id)}
-                    />
-                    <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                      <Play className="h-7 w-7 fill-white/90 text-white/90 drop-shadow-md" />
-                    </span>
-                  </>
+                  <video
+                    src={img.rawUrl}
+                    preload="metadata"
+                    muted
+                    playsInline
+                    className="aspect-square w-full cursor-pointer bg-muted object-cover"
+                    onClick={() => toggle(img.id)}
+                  />
                 ) : (
                   /* eslint-disable-next-line @next/next/no-img-element */
                   <img
@@ -273,18 +260,26 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                     onClick={() => toggle(img.id)}
                   />
                 )}
-                {/* 正中放大按钮：点击放大查看，不触发选中 */}
+                {/* 正中按钮：视频为常驻播放键（不随鼠标出现消失），图片为 hover 放大键；点击进灯箱，不触发选中 */}
                 <button
                   type="button"
-                  aria-label="放大查看"
-                  title="放大查看"
-                  className="absolute inset-0 m-auto flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-black/80 group-hover:opacity-100"
+                  aria-label={img.kind === "video" ? "播放" : "放大查看"}
+                  title={img.kind === "video" ? "播放" : "放大查看"}
+                  className={`absolute inset-0 m-auto flex items-center justify-center rounded-full text-white hover:bg-black/80 ${
+                    img.kind === "video"
+                      ? "h-12 w-12 bg-black/50"
+                      : "h-10 w-10 bg-black/60 opacity-0 transition-opacity group-hover:opacity-100"
+                  }`}
                   onClick={(e) => {
                     e.stopPropagation();
                     setPreview(idx);
                   }}
                 >
-                  <ZoomIn className="h-5 w-5" />
+                  {img.kind === "video" ? (
+                    <Play className="h-6 w-6 fill-white/90 text-white/90 drop-shadow-md" />
+                  ) : (
+                    <ZoomIn className="h-5 w-5" />
+                  )}
                 </button>
                 {/* 勾选按钮：未选中任何图片时 hover 才显示；本卡片已选中或页面有选中时常驻 */}
                 <label
@@ -299,23 +294,6 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                     onChange={() => toggle(img.id)}
                   />
                 </label>
-                {/* 顶部操作：重新审核（仅已发布；复制外链走图片下方「外链」按钮的弹窗） */}
-                <div className="absolute right-2 top-2 z-10 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
-                  {img.status === "PUBLISHED" && (
-                    <button
-                      type="button"
-                      aria-label="重新审核"
-                      title="重新审核：通过前将从画廊与外链隐藏"
-                      className="rounded-md bg-black/60 p-1.5 text-white transition-colors hover:bg-black/80"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        reReview(img.id);
-                      }}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
                 <p className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent p-1.5 text-xs text-white opacity-0 group-hover:opacity-100">
                   {img.filename}
                 </p>

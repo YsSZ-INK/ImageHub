@@ -80,19 +80,14 @@ export function DailyAlbumClient() {
               <div key={img.id} className="group overflow-hidden rounded-lg border border-border">
                 <div className="relative">
                   {img.kind === "video" ? (
-                    <>
-                      <video
-                        src={img.rawUrl}
-                        preload="metadata"
-                        muted
-                        playsInline
-                        className="aspect-square w-full cursor-pointer bg-muted object-cover"
-                        onClick={() => setPreview(idx)}
-                      />
-                      <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                        <Play className="h-7 w-7 fill-white/90 text-white/90 drop-shadow-md" />
-                      </span>
-                    </>
+                    <video
+                      src={img.rawUrl}
+                      preload="metadata"
+                      muted
+                      playsInline
+                      className="aspect-square w-full cursor-pointer bg-muted object-cover"
+                      onClick={() => setPreview(idx)}
+                    />
                   ) : (
                     /* eslint-disable-next-line @next/next/no-img-element */
                     <img
@@ -103,18 +98,26 @@ export function DailyAlbumClient() {
                       onClick={() => setPreview(idx)}
                     />
                   )}
-                  {/* 正中放大按钮：点击放大查看 */}
+                  {/* 正中按钮：视频为常驻播放键（不随鼠标出现消失），图片为 hover 放大键；点击进灯箱 */}
                   <button
                     type="button"
-                    aria-label="放大查看"
-                    title="放大查看"
-                    className="absolute inset-0 m-auto flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-black/80 group-hover:opacity-100"
+                    aria-label={img.kind === "video" ? "播放" : "放大查看"}
+                    title={img.kind === "video" ? "播放" : "放大查看"}
+                    className={`absolute inset-0 m-auto flex items-center justify-center rounded-full text-white hover:bg-black/80 ${
+                      img.kind === "video"
+                        ? "h-12 w-12 bg-black/50"
+                        : "h-10 w-10 bg-black/60 opacity-0 transition-opacity group-hover:opacity-100"
+                    }`}
                     onClick={(e) => {
                       e.stopPropagation();
                       setPreview(idx);
                     }}
                   >
-                    <ZoomIn className="h-5 w-5" />
+                    {img.kind === "video" ? (
+                      <Play className="h-6 w-6 fill-white/90 text-white/90 drop-shadow-md" />
+                    ) : (
+                      <ZoomIn className="h-5 w-5" />
+                    )}
                   </button>
                 </div>
                 {/* 上传者标签：常驻显示（谁上传的 + 时间），字体加大便于阅读 */}

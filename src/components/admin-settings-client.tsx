@@ -853,8 +853,8 @@ export function AdminSettingsClient() {
               value={form.storageDriver}
               onChange={(e) => setForm({ ...form, storageDriver: e.target.value as SiteSettings["storageDriver"] })}
             >
-              <option value="local">本地磁盘（存放在服务器 VPS 上）</option>
-              <option value="r2">对象存储（R2 / OSS / COS / MinIO…，不占用 VPS 空间）</option>
+              <option value="local">本地磁盘（存放在服务器上）</option>
+              <option value="r2">对象存储（R2 / OSS / COS / MinIO…，不占用服务器空间）</option>
             </Select>
           </div>
 

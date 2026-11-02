@@ -213,10 +213,10 @@ export async function syncR2Once(): Promise<SyncStatus> {
 }
 
 // 预热：把全部图片的 400px 缩略图拉进缓存（内存 → 磁盘持久化）。
-// 2560px 预览档不主动预热（大图缩放是 CPU 重活，小核 VPS 全量预热会把 CPU 打满导致 SSH 饿死），
+// 2560px 预览档不主动预热（大图缩放是 CPU 重活，小核服务器全量预热会把 CPU 打满导致 SSH 饿死），
 // 改为灯箱访问时现场生成一次并进磁盘缓存。
 // 已缓存的直接跳过（无网络请求）；单张失败静默跳过，下轮对账后自动补。
-// 并发自适应：min(2, CPU 核数 - 1)，1-2 核 VPS 单线程跑；每张之间小睡让出 CPU。
+// 并发自适应：min(2, CPU 核数 - 1)，1-2 核服务器单线程跑；每张之间小睡让出 CPU。
 let prewarming = false;
 
 const PREWARM_CONCURRENCY = Math.min(2, Math.max(1, require("os").cpus().length - 1));

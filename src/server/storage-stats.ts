@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 
 // 用户本地磁盘占用（配额口径）：仅统计存放在本地磁盘的文件；
-// R2 中的文件不占 VPS 空间，也就不占配额。迁移到 R2 后配额自动释放。
+// R2 中的文件不占服务器空间，也就不占配额。迁移到 R2 后配额自动释放。
 export async function localUsageOf(userId: string): Promise<bigint> {
   const agg = await prisma.image.aggregate({ _sum: { size: true }, where: { userId, storage: "local" } });
   // SQLite/PG 下 sum 类型推断不同（number | bigint），统一转 BigInt
