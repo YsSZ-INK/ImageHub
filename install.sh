@@ -12,7 +12,10 @@
 #   4) 站点对外访问地址  默认 http://公网IP:端口
 #   5) 数据库密码        留空自动生成 64 位随机密码
 #   6) 是否启用 Redis    默认不启用（限流自动降级进程内存）
-#   会话密钥 AUTH_SECRET 始终自动随机生成，不询问。
+#   启动成功后 7) 引导立即注册站长账号：第一个注册的账号自动成为超级管理员，
+#   请求会自动携带脚本生成的首注册门控令牌（SETUP_TOKEN），防止服务就绪到
+#   站长注册之间的窗口被公网陌生人抢注超管。
+#   会话密钥 AUTH_SECRET 与 SETUP_TOKEN 始终自动随机生成，不询问。
 #
 # 非交互场景（curl|bash / CI / 脚本化部署）全部取默认值，或用环境变量预设：
 #   SITE_URL=https://img.example.com PORT=8080 IMAGEHUB_DIR=/opt/ImageHub \
@@ -60,17 +63,17 @@ gen_key() { openssl rand -hex 32 2>/dev/null || od -An -N16 -tx1 /dev/urandom | 
 
 # ---------- 1) 安装目录 ----------
 INSTALL_DIR="${IMAGEHUB_DIR:-}"
-ask INSTALL_DIR "1/6 安装目录" "$HOME/ImageHub"
+ask INSTALL_DIR "1/7 安装目录" "$HOME/ImageHub"
 case "$INSTALL_DIR" in "~"*) INSTALL_DIR="${INSTALL_DIR/#\~/$HOME}" ;; esac
 
 # ---------- 2) 服务端口 ----------
-ask PORT "2/6 服务端口" "$DEFAULT_PORT"
+ask PORT "2/7 服务端口" "$DEFAULT_PORT"
 case "$PORT" in ''|*[!0-9]*) err "端口必须是数字" ;; esac
 [ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || err "端口需在 1-65535 之间"
 
 # ---------- 3) 端口绑定地址 ----------
 # 绑定地址决定暴露与否：Docker 发布端口不走系统防火墙（iptables DOCKER 链 / Docker Desktop 放行）
-ask BIND_IP "3/6 端口绑定地址（127.0.0.1=仅本机，0.0.0.0=对外网开放）" "127.0.0.1"
+ask BIND_IP "3/7 端口绑定地址（127.0.0.1=仅本机，0.0.0.0=对外网开放）" "127.0.0.1"
 case "$BIND_IP" in 127.0.0.1|0.0.0.0) ;; *) warn "非常规绑定地址：${BIND_IP}（一般填 127.0.0.1 或 0.0.0.0）" ;; esac
 
 # ---------- 4) 站点对外访问地址 ----------
@@ -78,13 +81,13 @@ if [ -z "${SITE_URL:-}" ]; then
   PUB_IP="$(curl -4 -fsS --max-time 3 https://ifconfig.me 2>/dev/null || true)"
   if [ -n "$PUB_IP" ]; then SITE_URL="http://${PUB_IP}:${PORT}"; else SITE_URL="http://127.0.0.1:${PORT}"; fi
 fi
-ask SITE_URL "4/6 站点对外访问地址" "$SITE_URL"
+ask SITE_URL "4/7 站点对外访问地址" "$SITE_URL"
 case "$SITE_URL" in http://*|https://*) ;; *) SITE_URL="http://${SITE_URL}" ;; esac
 
 # ---------- 5) 数据库密码 ----------
 if [ -z "${POSTGRES_PASSWORD:-}" ]; then
   if [ -t 0 ]; then
-    read -rp "5/6 数据库密码（留空自动生成 64 位随机密码）: " _p || _p=""
+    read -rp "5/7 数据库密码（留空自动生成 64 位随机密码）: " _p || _p=""
     POSTGRES_PASSWORD="${_p:-$(gen_key)}"
   else
     POSTGRES_PASSWORD="$(gen_key)"
@@ -94,13 +97,16 @@ fi
 
 # ---------- 6) Redis ----------
 if [ -z "${REDIS_ENABLED:-}" ] && [ -t 0 ]; then
-  read -rp "6/6 是否启用 Redis 缓存？（多实例部署或需要限流计数重启不丢失时建议启用）[y/N]: " _r || _r=""
+  read -rp "6/7 是否启用 Redis 缓存？（多实例部署或需要限流计数重启不丢失时建议启用）[y/N]: " _r || _r=""
   case "${_r:-N}" in [yY]|[yY][eE][sS]) REDIS_ENABLED=1 ;; *) REDIS_ENABLED="" ;; esac
 fi
 REDIS_ENABLED="${REDIS_ENABLED:-}"
 
-# ---------- 生成会话密钥（不询问，保证强度） ----------
+# ---------- 生成会话密钥与首注册门控令牌（不询问，保证强度） ----------
 AUTH_SECRET="$(gen_key)"
+# 首注册门控令牌——空库状态下首次注册（将自动成为超级管理员）必须携带该令牌，
+# 防止服务就绪到站长注册之间的窗口被公网陌生人抢注；脚本随后引导站长立即注册
+SETUP_TOKEN="${SETUP_TOKEN:-$(gen_key)}"
 
 log ""
 log "──────── 安装配置确认 ────────"
@@ -109,6 +115,7 @@ log "端口绑定　　：${BIND_IP}:${PORT}（容器内 3000）"
 log "站点地址　　：${SITE_URL}"
 log "数据库密码　：${POSTGRES_PASSWORD:0:4}********（已隐藏）"
 log "会话密钥　　：随机生成"
+log "首注册门控　：已启用（启动后引导注册站长账号，第一个注册即超管）"
 log "Redis 缓存　：$([ -n "$REDIS_ENABLED" ] && echo '启用' || echo '不启用（限流走进程内存）')"
 log "──────────────────────────────"
 
@@ -122,6 +129,14 @@ if [ -f .env ]; then
     printf 'REDIS_URL="redis://redis:6379"\n' >> .env
     log "已追加 REDIS_URL"
   fi
+  # 重跑安装时沿用 .env 中的 SETUP_TOKEN（不轮换，保证手动注册指引可用）；
+  # .env 无该行则追加，保证首注册门控始终生效
+  if grep -qE '^SETUP_TOKEN=' .env; then
+    SETUP_TOKEN="$(sed -nE 's/^SETUP_TOKEN="?([^"]*)"?$/\1/p' .env | tail -n1)"
+  else
+    printf 'SETUP_TOKEN="%s"\n' "$SETUP_TOKEN" >> .env
+    log "已追加 SETUP_TOKEN（首注册门控）"
+  fi
 else
   {
     echo "SITE_URL=\"${SITE_URL}\""
@@ -129,9 +144,10 @@ else
     echo "PORT=\"${PORT}\""
     echo "BIND_IP=\"${BIND_IP}\""
     echo "POSTGRES_PASSWORD=\"${POSTGRES_PASSWORD}\""
+    echo "SETUP_TOKEN=\"${SETUP_TOKEN}\""
     [ -n "$REDIS_ENABLED" ] && echo "REDIS_URL=\"redis://redis:6379\""
   } > .env
-  log ".env 已生成（AUTH_SECRET 随机；数据库密码为自定义或随机值）"
+  log ".env 已生成（AUTH_SECRET/SETUP_TOKEN 随机；数据库密码为自定义或随机值）"
 fi
 
 # ---------- 下载 compose 与管理脚本 ----------
@@ -158,6 +174,74 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
+# ---------- 7) 引导注册站长账号 ----------
+# 服务就绪后立即引导站长注册，请求自动携带 SETUP_TOKEN；
+# 第一个注册的账号即刻成为超级管理员，公网抢注窗口（服务就绪 → 站长注册）随之关闭
+REG_DONE=""
+
+# JSON 字符串转义（先反斜杠后双引号），用于拼接注册请求体
+json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+
+# 注册失败/被跳过时的手动注册指引（密码规则与站点强密码校验一致：≥8 位且含大小写字母与数字）
+print_manual_hint() {
+  warn "手动注册方式（在服务器上执行，密码需至少 8 位且含大小写字母与数字）："
+  warn "  curl -sS -X POST http://127.0.0.1:${PORT}/api/register -H 'Content-Type: application/json' \\"
+  warn "       -d '{\"email\":\"you@example.com\",\"name\":\"yourname\",\"password\":\"Abcdef12\",\"setupToken\":\"${SETUP_TOKEN}\"}'"
+  warn "返回 201 即成功，该账号自动成为超级管理员。"
+  warn "（或删除 .env 中的 SETUP_TOKEN 行并 docker compose up -d 关闭门控后，在网页上注册第一个账号）"
+}
+
+register_owner() {
+  log ""
+  log "──────── 7/7 注册站长账号 ────────"
+  log "第一个注册的账号将自动成为超级管理员（站长），建议现在完成注册。"
+  read -rp "现在注册站长账号？[Y/n]: " _go || _go=""
+  case "${_go:-Y}" in
+    [nN]|[nN][oO]) warn "已跳过：稍后可按下方指引手动注册（首注册门控保持生效）"; print_manual_hint; return 0 ;;
+  esac
+  local _email _name _pw _pw2 _attempt
+  for _attempt in 1 2 3; do
+    read -rp "邮箱: " _email || _email=""
+    read -rp "用户名: " _name || _name=""
+    read -rsp "密码（至少 8 位，含大小写字母与数字）: " _pw || _pw=""; echo ""
+    read -rsp "再次输入密码: " _pw2 || _pw2=""; echo ""
+    if [ -z "$_email" ] || [ -z "$_name" ] || [ -z "$_pw" ]; then
+      warn "邮箱/用户名/密码均不能为空，请重试（第 ${_attempt}/3 次）"; continue
+    fi
+    if [ "$_pw" != "$_pw2" ]; then
+      warn "两次输入的密码不一致，请重试（第 ${_attempt}/3 次）"; continue
+    fi
+    local _body _resp _code _err
+    _body="{\"email\":\"$(json_escape "$_email")\",\"name\":\"$(json_escape "$_name")\",\"password\":\"$(json_escape "$_pw")\",\"setupToken\":\"$(json_escape "$SETUP_TOKEN")\"}"
+    _resp="$(curl -sS --max-time 15 -X POST "http://127.0.0.1:${PORT}/api/register" \
+      -H 'Content-Type: application/json' -d "$_body" -w $'\n%{http_code}' || true)"
+    _code="$(printf '%s' "$_resp" | tail -n1)"
+    _err="$(printf '%s' "$_resp" | grep -oE '"error":"[^"]*"' | cut -d'"' -f4 || true)"
+    if [ "$_code" = "201" ]; then
+      REG_DONE=1
+      log "站长账号注册成功：${_email}（已自动成为超级管理员）"
+      return 0
+    elif [ "$_code" = "409" ]; then
+      warn "站点已有注册用户（${_err:-邮箱或用户名已被占用}），直接登录即可"
+      return 0
+    elif [ "$_code" = "403" ] && printf '%s' "$_err" | grep -q '关闭注册'; then
+      warn "${_err}：请用现有账号登录"
+      return 0
+    else
+      warn "注册失败（HTTP ${_code:-未知}）：${_err:-请检查网络或容器日志}（第 ${_attempt}/3 次）"
+    fi
+  done
+  warn "连续 3 次注册失败，已跳过（首注册门控保持生效）"
+  print_manual_hint
+  return 0
+}
+
+if [ -t 0 ]; then
+  register_owner
+else
+  warn "非交互安装：首注册门控（SETUP_TOKEN）已生效，空库首次注册需携带该令牌，防止公网抢注超管"
+fi
+
 log "──────────────────────────────────────────────"
 log "安装完成！访问地址：${SITE_URL}"
 if [ "$BIND_IP" = "127.0.0.1" ]; then
@@ -170,6 +254,11 @@ fi
 if [ -n "$REDIS_ENABLED" ]; then
   log "Redis 容器已启动：请到 站点设置 → Redis 缓存 打开「启用 Redis」开关"
 fi
-log "注册的第一个账号自动成为超级管理员（站长），随后到「站点设置」建议关闭开放注册"
+if [ -n "$REG_DONE" ]; then
+  log "站长账号已注册并自动成为超级管理员：打开站点登录即可"
+  log "建议：到「站点设置」关闭开放注册"
+else
+  warn "站长账号尚未注册：注册第一个账号前首注册门控（SETUP_TOKEN）持续生效"
+fi
 log "管理：bash ${INSTALL_DIR}/manage.sh（19 项菜单：更新/备份/角色管理/定时备份/用户列表等）"
 log "──────────────────────────────────────────────"

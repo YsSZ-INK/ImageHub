@@ -17,6 +17,8 @@ export const POST = handle(async (req: Request) => {
 
 // 通过链接验证邮箱（匿名可访问）
 export const PUT = handle(async (req: Request) => {
+  // 验证成功会写库（emailVerified），属于状态变更接口，同样做同源校验
+  assertSameOrigin(req);
   const { token } = (await req.json()) as { token?: string };
   if (!token) throw new AppError("缺少 token", 400);
   await verifyEmail(token);

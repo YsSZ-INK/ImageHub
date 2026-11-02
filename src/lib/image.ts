@@ -2,7 +2,7 @@ import sharp from "sharp";
 import { createHash, randomBytes } from "crypto";
 import { createReadStream, promises as fs } from "fs";
 import { encode } from "blurhash";
-import { getStorageFor, getLocalStorage, getUploadMarker } from "@/lib/storage";
+import { getStorageFor, getLocalStorage, putUpload, putStreamUpload } from "@/lib/storage";
 import { prewriteThumb } from "@/lib/thumb-cache";
 import { AppError } from "@/lib/api";
 
@@ -164,15 +164,14 @@ export async function processAndStoreImage(
   const [thumbBuf, blurhash] = await Promise.all([thumbTask, blurTask]);
 
   // 按站点设置的存储位置写入（新上传都进当前目标），并记录位置到 Image.storage（local 或 r2:<桶下标>）
-  const marker = await getUploadMarker();
-  const storage = await getStorageFor(marker);
+  // 对象存储写失败（桶满/欠费/网络）时 putUpload 自动降级本地并邮件提醒管理员
   const rand = randomBytes(4).toString("hex");
   const storageKey = `images/${userId}/${monthKey()}/${sha256.slice(0, 16)}-${rand}.${ext}`;
+  const marker = await putUpload(storageKey, mainBuf, { contentType: mainMime });
 
   // 缩略图不上传存储（省流量省桶空间）：只写本地两级缓存（内存 + storage/.thumbs/），每天自动清一次
   // 缓存 key 与 thumb 路由的生成 key 一致，首次访问直接命中
   prewriteThumb(`${marker}:${storageKey}:gen400`, thumbBuf);
-  await storage.put(storageKey, mainBuf, { contentType: mainMime });
 
   return {
     filename: sanitizeName(originalName),
@@ -201,12 +200,11 @@ export async function processAndStoreVideo(
   if (!mime) throw new AppError("不支持的视频格式（仅允许 mp4/webm/mov/mkv）", 415);
 
   const sha256 = createHash("sha256").update(buf).digest("hex");
-  const marker = await getUploadMarker();
-  const storage = await getStorageFor(marker);
   const rand = randomBytes(4).toString("hex");
   const ext = ALLOWED_VIDEO_MIMES[mime];
   const storageKey = `videos/${userId}/${monthKey()}/${sha256.slice(0, 16)}-${rand}.${ext}`;
-  await storage.put(storageKey, buf, { contentType: mime });
+  // 对象存储写失败时自动降级本地（见 putUpload）
+  const marker = await putUpload(storageKey, buf, { contentType: mime });
 
   return {
     filename: sanitizeName(originalName),
@@ -242,12 +240,11 @@ export async function processAndStoreVideoFile(
   const mime = detectVideoMime(head);
   if (!mime) throw new AppError("不支持的视频格式（仅允许 mp4/webm/mov/mkv）", 415);
 
-  const marker = await getUploadMarker();
-  const storage = await getStorageFor(marker);
   const rand = randomBytes(4).toString("hex");
   const ext = ALLOWED_VIDEO_MIMES[mime];
   const storageKey = `videos/${userId}/${monthKey()}/${sha256.slice(0, 16)}-${rand}.${ext}`;
-  await storage.putStream(storageKey, createReadStream(filePath), { contentType: mime, size });
+  // 对象存储写失败时自动降级本地；流工厂保证降级重试拿到新流（见 putStreamUpload）
+  const marker = await putStreamUpload(storageKey, () => createReadStream(filePath), { contentType: mime, size });
 
   return {
     filename: sanitizeName(originalName),

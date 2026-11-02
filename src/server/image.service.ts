@@ -3,6 +3,7 @@ import { AppError } from "@/lib/api";
 import { isAdminRole, isSuper } from "@/lib/roles";
 import { cachedJson, invalidateJson } from "@/lib/cache";
 import { logActivity } from "@/server/audit.service";
+import { notifyAdmins } from "@/lib/mailer";
 import { hasAccessTo } from "@/server/access.service";
 import { getStorageFor } from "@/lib/storage";
 import { processAndStoreImage, processAndStoreVideo, processAndStoreVideoFile, detectVideoMime } from "@/lib/image";
@@ -145,6 +146,12 @@ export async function approveImage(id: string, viewer: Viewer): Promise<ImageDTO
 // 默认相册「我的相册」：懒创建，未指定相册的上传自动归入
 export const MY_ALBUM_NAME = "我的相册";
 
+// 上传可见性：默认私有（不进画廊）；友链 = 登录用户可见；公开 = 进画廊候选（普通用户仍需审核）
+export type UploadVisibility = "PRIVATE" | "UNLISTED" | "PUBLIC";
+export function normalizeUploadVisibility(v: unknown): UploadVisibility {
+  return v === "UNLISTED" || v === "PUBLIC" ? v : "PRIVATE";
+}
+
 export async function ensureMyAlbum(userId: string) {
   const existing = await prisma.album.findFirst({
     where: { userId, name: MY_ALBUM_NAME },
@@ -165,7 +172,7 @@ export async function ensureMyAlbum(userId: string) {
 export async function uploadImages(
   user: User,
   files: { buf: Buffer; name: string; contentType: string }[],
-  opts?: { albumId?: string | null }
+  opts?: { albumId?: string | null; visibility?: UploadVisibility }
 ): Promise<{ results: (ImageDTO | { name: string; error: string })[]; deduped: number }> {
   const results: (ImageDTO | { name: string; error: string })[] = [];
   let deduped = 0;
@@ -174,7 +181,7 @@ export async function uploadImages(
 
   for (const f of files) {
     try {
-      const dto = await uploadOne(user, f, targetAlbumId);
+      const dto = await uploadOne(user, f, targetAlbumId, opts?.visibility);
       results.push(dto);
       if ("deduped" in dto && dto.deduped) deduped++;
     } catch (err) {
@@ -200,7 +207,8 @@ export async function assertAlbumAccess(viewer: Viewer, albumId: string | null) 
 async function uploadOne(
   user: User,
   f: { buf: Buffer; name: string; contentType: string },
-  albumId: string | null
+  albumId: string | null,
+  visibility: UploadVisibility = "PRIVATE"
 ): Promise<ImageDTO & { deduped?: boolean }> {
   // sha256 去重：同用户重复上传直接复用
   const { createHash } = await import("crypto");
@@ -246,12 +254,19 @@ async function uploadOne(
       sha256: processed.sha256,
       blurhash: processed.blurhash,
       albumId,
-      // 默认私有：不进公共画廊，用户在「我的图片」勾选后才公开（两级管理员上传免审核直接发布）
-      visibility: "PRIVATE",
+      // 默认私有：不进公共画廊；可选友链/公开（公开 = 进画廊候选，普通用户审核通过后才真正展示）
+      visibility,
       status: isAdminRole(user.role) ? "PUBLISHED" : "PENDING",
     },
     include: { user: { select: { name: true } } },
   });
+  // 普通用户选择公开 = 进画廊申请：邮件提醒管理员审核（失败不影响上传）
+  if (visibility === "PUBLIC" && !isAdminRole(user.role)) {
+    void notifyAdmins(
+      "【ImageHub】新的进画廊申请待审核",
+      `${user.name} 上传了「${processed.filename}」并选择公开（进入画廊），请到后台审核。`
+    );
+  }
   return toDTO(img);
 }
 
@@ -583,20 +598,19 @@ export async function listAlbums(viewer: Viewer, username?: string) {
     : [];
   const videoCovers = new Set(coverRows.filter((i) => i.mimeType.startsWith("video/")).map((i) => i.id));
   // 封面默认值：未手动设置封面（或封面指向视频无缩略图）时，默认取相册内第一张图片（最早上传）作为封面
-  const coverless = albums.filter((a) => !a.coverImageId || videoCovers.has(a.coverImageId));
-  const fallbacks = new Map<string, string | null>();
-  await Promise.all(
-    coverless.map(async (a) => {
-      const first = a._count.images
-        ? await prisma.image.findFirst({
-            where: { albumId: a.id, deletedAt: null, mimeType: { not: { startsWith: "video" } } },
-            orderBy: { createdAt: "asc" },
-            select: { id: true },
-          })
-        : null;
-      fallbacks.set(a.id, first ? `/api/images/${first.id}/thumb` : null);
-    })
-  );
+  const coverlessIds = albums
+    .filter((a) => (!a.coverImageId || videoCovers.has(a.coverImageId)) && a._count.images > 0)
+    .map((a) => a.id);
+  // 单次 DISTINCT ON 查询取每个相册最早的非视频图片（替代逐相册 findFirst 的 N+1）
+  const firstRows = coverlessIds.length
+    ? await prisma.image.findMany({
+        where: { albumId: { in: coverlessIds }, deletedAt: null, mimeType: { not: { startsWith: "video" } } },
+        orderBy: [{ albumId: "asc" }, { createdAt: "asc" }],
+        distinct: ["albumId"],
+        select: { id: true, albumId: true },
+      })
+    : [];
+  const fallbacks = new Map(firstRows.map((r) => [r.albumId, `/api/images/${r.id}/thumb`] as const));
   return albums.map((a) => ({
     id: a.id,
     name: a.name,

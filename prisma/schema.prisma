@@ -20,6 +20,9 @@ model User {
   storageQuota  BigInt    @default(5368709120) // 默认 5GB
   storageUsed   BigInt    @default(0)
   status        String    @default("ACTIVE") // ACTIVE | BANNED
+  // 会话吊销版本号——改密/管理员重置密码时 +1，签发时快照进 JWT，
+  // 与库中当前值不一致的旧会话立即失效（应用层比对，见 lib/session.ts）
+  tokenVersion  Int       @default(0)
   emailVerified DateTime?
   createdAt     DateTime  @default(now())
 
@@ -63,6 +66,10 @@ model Image {
   @@index([userId, createdAt])
   @@index([sha256])
   @@index([visibility, createdAt])
+  // 公共画廊热点查询：visibility/status/deletedAt 全等 + createdAt 排序可完全走索引（免 filesort）
+  @@index([visibility, status, deletedAt, createdAt])
+  // 存储位置筛选与用量聚合（ConsoleShell 每页导航都会按 storage 聚合一次）
+  @@index([storage])
   @@index([albumId])
   @@index([postId])
 }

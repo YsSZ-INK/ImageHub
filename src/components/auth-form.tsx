@@ -15,7 +15,13 @@ import Link from "next/link";
 export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
   const router = useRouter();
   const params = useSearchParams();
-  const callbackUrl = params.get("callbackUrl") || "/gallery";
+  // callbackUrl 仅接受站内相对路径：挡掉 //evil.com、/\evil.com 这类
+  // 被浏览器视为协议相对地址的外站跳转（开放重定向钓鱼）
+  const rawCallback = params.get("callbackUrl");
+  const callbackUrl =
+    rawCallback && rawCallback.startsWith("/") && !rawCallback.startsWith("//") && !rawCallback.startsWith("/\\")
+      ? rawCallback
+      : "/gallery";
 
   const [loginData, setLoginData] = useState({ email: "", password: "", remember: false });
   const [regData, setRegData] = useState({ email: "", name: "", password: "" });

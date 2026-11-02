@@ -1,6 +1,6 @@
 import { handle, assertSameOrigin, ok, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
-import { uploadImages, assertAlbumAccess } from "@/server/image.service";
+import { uploadImages, assertAlbumAccess, normalizeUploadVisibility } from "@/server/image.service";
 import { rateLimit } from "@/lib/rate-limit";
 import { lookup } from "dns/promises";
 import net from "net";
@@ -8,8 +8,8 @@ import net from "net";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-// 安全员（渗透测试修复）：数值化判断 IP 是否私网/保留段。
-// 覆盖 IPv4 私网与保留段、IPv6 本机/链路本地/ULA、IPv4-mapped IPv6（::ffff:127.0.0.1 这类曾绕过旧正则）。
+// 数值化判断 IP 是否私网/保留段。
+// 覆盖 IPv4 私网与保留段、IPv6 本机/链路本地/ULA、IPv4-mapped IPv6（::ffff:127.0.0.1 这类形态）
 function isPrivateIp(ip: string): boolean {
   if (net.isIPv4(ip)) {
     const [a, b] = ip.split(".").map(Number);
@@ -37,7 +37,7 @@ function isPrivateIp(ip: string): boolean {
   return false;
 }
 
-// 安全员（渗透测试修复）：URL 主机校验——字面量 IP 直接判断；域名先 DNS 解析再判断（防 DNS rebinding）。
+// URL 主机校验：字面量 IP 直接判断；域名先 DNS 解析再判断（挡 DNS rebinding）。
 async function assertPublicHost(hostname: string) {
   const h = hostname.toLowerCase();
   if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) {
@@ -48,8 +48,14 @@ async function assertPublicHost(hostname: string) {
     return;
   }
   try {
-    const { address } = await lookup(h, { family: 0 });
-    if (isPrivateIp(address)) throw new AppError("不允许抓取内网地址", 400);
+    // 校验「全部」解析记录——域名可同时解析出公网与内网多条地址，只取单条会被混入的内网记录绕过。
+    // 残余风险（文档化取舍）：lookup 与实际 fetch 之间存在 TOCTOU（DNS rebinding）窗口，
+    // 彻底消除需自研 HTTP 客户端绑定已校验的解析结果，个人站点不值得为此引入额外复杂度。
+    const addresses = await lookup(h, { family: 0, all: true });
+    if (addresses.length === 0) throw new AppError("无法解析目标地址", 400);
+    for (const { address } of addresses) {
+      if (isPrivateIp(address)) throw new AppError("不允许抓取内网地址", 400);
+    }
   } catch (e) {
     if (e instanceof AppError) throw e;
     throw new AppError("无法解析目标地址", 400);
@@ -64,11 +70,11 @@ export const POST = handle(async (req: Request) => {
   const rl = await rateLimit(`remote:${user.id}`, 10, 60_000);
   if (!rl.success) throw new AppError("抓取过于频繁", 429);
 
-  const { url, albumId } = (await req.json()) as { url?: string; albumId?: string };
+  const { url, albumId, visibility } = (await req.json()) as { url?: string; albumId?: string; visibility?: string };
   if (!url || !/^https?:\/\//i.test(url)) throw new AppError("URL 不合法", 400);
   await assertAlbumAccess(user, albumId ?? null);
 
-  // 安全员（渗透测试修复）：redirect: "manual" 逐跳校验（默认跟随重定向会绕过内网检查）
+  // redirect: "manual" 逐跳校验：默认跟随重定向会绕过内网检查
   let res: Response | null = null;
   let finalUrl: URL | null = null;
   try {
@@ -108,7 +114,7 @@ export const POST = handle(async (req: Request) => {
   if (arr.byteLength > 50 * 1024 * 1024) throw new AppError("远程文件过大（上限 50MB）", 413);
 
   const name = decodeURIComponent((finalUrl ?? new URL(url)).pathname.split("/").pop() || "remote-file");
-  const { results } = await uploadImages(user, [{ buf: Buffer.from(arr), name, contentType }], { albumId: albumId ?? null });
+  const { results } = await uploadImages(user, [{ buf: Buffer.from(arr), name, contentType }], { albumId: albumId ?? null, visibility: normalizeUploadVisibility(visibility) });
   const first = results[0];
   if (!first || "error" in first) throw new AppError("error" in first ? first.error : "抓取失败", 400);
   return ok(first, 201);

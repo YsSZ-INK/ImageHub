@@ -176,8 +176,13 @@ export function AdminSettingsClient() {
     }
   }
 
-  // 发送测试邮件：按已保存的 SMTP 配置真实发一封到当前管理员邮箱
+  // 同步锁：state 生效前连点仍可能触发两次请求，用 ref 挡住重复提交
+  const testingRef = useRef(false);
+
+  // 发送测试邮件：按已保存的 SMTP 配置真实发一封到超级管理员邮箱
   async function sendTestMail() {
+    if (testingRef.current) return;
+    testingRef.current = true;
     setTesting(true);
     try {
       const res = await fetch("/api/admin/settings/test-mail", { method: "POST" });
@@ -185,6 +190,7 @@ export function AdminSettingsClient() {
       if (json.ok) toast.success(json.data.message);
       else toast.error(json.error);
     } finally {
+      testingRef.current = false;
       setTesting(false);
     }
   }
@@ -353,16 +359,31 @@ export function AdminSettingsClient() {
     }
   }
 
-  // 备份：直接导航到下载接口，由浏览器流式保存（Content-Disposition attachment）
-  function startBackup() {
+  // 备份：POST 触发生成并下载，前端拿到 blob 后交浏览器保存。
+  // 备份会先驻留内存，个人站规模可接受；用 POST + 同源校验避免跨站静默触发下载。
+  async function startBackup() {
     if (!confirm("生成备份压缩包（数据库 + 全部存储文件）并下载？")) return;
-    const a = document.createElement("a");
-    a.href = "/api/admin/backup";
-    a.download = "imagehub-backup.tar.gz";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    toast.success("备份已开始生成，稍后自动下载");
+    try {
+      const res = await fetch("/api/admin/backup", { method: "POST" });
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        toast.error(j?.error || "备份失败，请重试");
+        return;
+      }
+      const blob = await res.blob();
+      const m = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "");
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = m?.[1] ?? "imagehub-backup.tar.gz";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("备份完成，已开始下载");
+    } catch {
+      toast.error("备份请求失败，请重试");
+    }
   }
 
   // 还原：选择备份文件 → 强确认 → 整包上传，覆盖全部数据与存储文件
@@ -651,9 +672,9 @@ export function AdminSettingsClient() {
       <Tabs defaultValue="sec-general" className="space-y-4">
         <TabsList>
           <TabsTrigger value="sec-general">常规</TabsTrigger>
+          <TabsTrigger value="sec-storage">存储设置</TabsTrigger>
           <TabsTrigger value="sec-mail">邮件配置</TabsTrigger>
           <TabsTrigger value="sec-redis">Redis 缓存</TabsTrigger>
-          <TabsTrigger value="sec-storage">存储设置</TabsTrigger>
           <TabsTrigger value="sec-backup">备份与还原</TabsTrigger>
         </TabsList>
 
@@ -763,7 +784,7 @@ export function AdminSettingsClient() {
               {testing ? <Loader2 className="animate-spin" /> : null} 发送测试邮件
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">测试邮件发送至当前管理员邮箱，需先保存配置。</p>
+          <p className="text-xs text-muted-foreground">测试邮件只发送至超级管理员邮箱，需先保存配置。</p>
         </CardContent>
       </Card>
         </TabsContent>

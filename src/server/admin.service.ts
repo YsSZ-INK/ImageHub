@@ -111,8 +111,10 @@ export async function adminUpdateUser(
       ...(patch.storageQuotaGB !== undefined
         ? { storageQuota: BigInt(Math.round(patch.storageQuotaGB * 1024 ** 3)) }
         : {}),
-      // 重置密码：服务端哈希，明文不落库
-      ...(patch.password ? { passwordHash: await bcrypt.hash(patch.password, 12) } : {}),
+      // 重置密码：服务端哈希，明文不落库；同时递增 tokenVersion 吊销该用户全部旧 JWT 会话
+      ...(patch.password
+        ? { passwordHash: await bcrypt.hash(patch.password, 12), tokenVersion: { increment: 1 } }
+        : {}),
     },
   });
   const verb = patch.password

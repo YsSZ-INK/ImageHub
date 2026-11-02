@@ -7,7 +7,7 @@ import { publicUser } from "@/server/user.service";
 export const runtime = "nodejs";
 
 export const GET = handle(async (req: Request) => {
-  // 安全员（渗透测试修复）：用户列表含全员邮箱/配额/封禁状态，必须超级管理员
+  // 用户列表含全员邮箱/配额/封禁状态，仅超级管理员可读
   const viewer = await requireApiSuper();
   const url = new URL(req.url);
   const users = await adminListUsers(url.searchParams.get("search") ?? undefined);

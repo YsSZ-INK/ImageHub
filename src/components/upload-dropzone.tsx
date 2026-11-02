@@ -37,6 +37,8 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
   const [remoteUrl, setRemoteUrl] = useState("");
   const [fetching, setFetching] = useState(false);
   const [albumId, setAlbumId] = useState("");
+  // 可见性：默认私有（不进画廊）；勾选「进入画廊」= 公开（与下拉联动，普通用户需审核后展示）
+  const [visibility, setVisibility] = useState<"PRIVATE" | "UNLISTED" | "PUBLIC">("PRIVATE");
 
   const seqRef = useRef(0);
   const activeRef = useRef(0);
@@ -73,6 +75,7 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
     const form = new FormData();
     form.append("file", file);
     if (albumId) form.append("albumId", albumId);
+    form.append("visibility", visibility);
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
@@ -218,7 +221,11 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
 
     // 全部片就绪 → 合并入库
     try {
-      const res = await fetch(`/api/upload/chunk/${uploadId}/complete`, { method: "POST" });
+      const res = await fetch(`/api/upload/chunk/${uploadId}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility }),
+      });
       const json = await res.json();
       if (json.ok) {
         update(id, { status: "done", progress: 100 });
@@ -291,7 +298,7 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
       const res = await fetch("/api/upload/remote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, ...(albumId ? { albumId } : {}) }),
+        body: JSON.stringify({ url, ...(albumId ? { albumId } : {}), visibility }),
       });
       const json = await res.json();
       if (json.ok) {
@@ -321,6 +328,31 @@ export function UploadDropzone({ onSettled, albums }: { onSettled?: () => void; 
           </Select>
         </div>
       )}
+      {/* 可见性 + 是否进画廊：默认私有、不进画廊；勾选「进入画廊」= 公开（两者联动） */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-muted-foreground">可见性</span>
+          <Select
+            value={visibility}
+            onChange={(e) => setVisibility(e.target.value as "PRIVATE" | "UNLISTED" | "PUBLIC")}
+            className="w-auto"
+          >
+            <option value="PRIVATE">私有（默认，仅自己）</option>
+            <option value="UNLISTED">友链（登录用户可见，不进画廊）</option>
+            <option value="PUBLIC">公开（进入画廊）</option>
+          </Select>
+        </div>
+        <label className="flex cursor-pointer items-center gap-1.5 select-none">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-seal"
+            checked={visibility === "PUBLIC"}
+            onChange={(e) => setVisibility(e.target.checked ? "PUBLIC" : "PRIVATE")}
+          />
+          进入画廊
+        </label>
+        {visibility === "PUBLIC" && <span className="text-xs text-muted-foreground">普通用户需管理员审核通过后才会在画廊展示</span>}
+      </div>
       <div
         role="button"
         aria-label="上传图片"

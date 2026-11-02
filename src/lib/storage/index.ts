@@ -96,3 +96,76 @@ export async function getUploadMarker(): Promise<string> {
   const s = await getSettings();
   return s.storageDriver === "r2" ? `r2:${s.r2UploadSlot}` : "local";
 }
+
+// ============ 上传写入：对象存储失败自动降级本地 + 邮件提醒管理员 ============
+import { prisma } from "@/lib/db";
+import { notifySupers } from "@/lib/mailer";
+
+// 降级提醒去抖：24 小时内最多发一封（Setting 表记录上次发送时间，重启不丢）
+const FALLBACK_MAIL_KEY = "lastR2FallbackMailAt";
+const FALLBACK_MAIL_INTERVAL = 24 * 3600_000;
+
+async function notifyR2Fallback(marker: string, err: unknown): Promise<void> {
+  try {
+    const now = Date.now();
+    const last = await prisma.setting.findUnique({ where: { key: FALLBACK_MAIL_KEY } });
+    if (last && now - Number(last.value) < FALLBACK_MAIL_INTERVAL) return;
+    await prisma.setting.upsert({
+      where: { key: FALLBACK_MAIL_KEY },
+      create: { key: FALLBACK_MAIL_KEY, value: String(now) },
+      update: { value: String(now) },
+    });
+    const s = await getSettings();
+    const idx = r2SlotIndex(marker);
+    const label = slotDisplayName(s.r2Slots[idx], idx, s.r2Slots.length);
+    // 存储降级属基础设施问题：只通知超级管理员
+    await notifySupers(
+      "【ImageHub】对象存储写入失败，已自动降级到本地磁盘",
+      [
+        `上传目标 ${label} 写入失败（存储桶已满、欠费或网络异常），本次文件已改为存到服务器本地磁盘。`,
+        `错误信息：${err instanceof Error ? err.message : String(err)}`,
+        "",
+        "建议：到「站点设置 → 存储设置」检查该桶用量与欠费情况；本地磁盘占满配额前请尽快处理。",
+        "降级期间存放在本地的文件，可在存储恢复后用「数据迁移」搬回对象存储。",
+        "（本提醒 24 小时内最多发送一次）",
+      ].join("\n")
+    );
+  } catch (e) {
+    console.error("[storage] 降级邮件提醒失败:", e);
+  }
+}
+
+/**
+ * 上传写入（整包）：按当前设置写到目标存储；目标是对象存储且写入失败（桶满/欠费/网络）时
+ * 自动降级写到本地磁盘并邮件提醒管理员（24h 去抖）。返回实际落盘的位置标记。
+ */
+export async function putUpload(key: string, data: Buffer, opts: PutOptions): Promise<string> {
+  const s = await getSettings();
+  const useR2 = s.storageDriver === "r2";
+  const marker = useR2 ? `r2:${s.r2UploadSlot}` : "local";
+  try {
+    await (await getStorageFor(marker)).put(key, data, opts);
+    return marker;
+  } catch (e) {
+    if (!useR2) throw e;
+    await (await getLocalStorage()).put(key, data, opts);
+    void notifyR2Fallback(marker, e);
+    return "local";
+  }
+}
+
+/** 上传写入（流式）：同 putUpload；makeStream 工厂保证降级重试时能拿到一条新流 */
+export async function putStreamUpload(key: string, makeStream: () => Readable, opts: PutOptions & { size: number }): Promise<string> {
+  const s = await getSettings();
+  const useR2 = s.storageDriver === "r2";
+  const marker = useR2 ? `r2:${s.r2UploadSlot}` : "local";
+  try {
+    await (await getStorageFor(marker)).putStream(key, makeStream(), opts);
+    return marker;
+  } catch (e) {
+    if (!useR2) throw e;
+    await (await getLocalStorage()).putStream(key, makeStream(), opts);
+    void notifyR2Fallback(marker, e);
+    return "local";
+  }
+}

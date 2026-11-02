@@ -10,7 +10,13 @@ import crypto from "crypto";
 const PREFIX = "enc:v1:";
 
 function deriveKey(): Buffer {
-  return crypto.createHash("sha256").update(process.env.AUTH_SECRET || "imagehub-dev-secret").digest();
+  // 密钥必须存在：没有 AUTH_SECRET 就无法加解密，也不回退任何公开缺省值。
+  // 解密路径的调用方自带 try/catch（解不开视为未配置），加密路径缺失密钥时直接报错。
+  const s = process.env.AUTH_SECRET;
+  if (!s) {
+    throw new Error("AUTH_SECRET 未设置：无法加解密站点密钥（请在 .env 执行 openssl rand -base64 32 生成）");
+  }
+  return crypto.createHash("sha256").update(s).digest();
 }
 
 export function encryptSecret(plain: string): string {

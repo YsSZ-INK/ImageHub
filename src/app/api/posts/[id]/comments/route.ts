@@ -1,6 +1,7 @@
 import { handle, assertSameOrigin, ok, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
 import { listComments, addComment } from "@/server/post.service";
+import { rateLimit } from "@/lib/rate-limit";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -22,6 +23,9 @@ export const GET = handle(async (_req: Request, { params }: { params: Promise<{ 
 export const POST = handle(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
   assertSameOrigin(req);
   const viewer = await requireApiUser();
+  // 评论限流：单账号 10 条/分钟，避免脚本化刷屏灌水
+  const rl = await rateLimit(`comment:${viewer.id}`, 10, 60_000);
+  if (!rl.success) throw new AppError("评论过于频繁，请稍后再试", 429);
   const { id } = await params;
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) throw new AppError("评论内容不能为空且最长 500 字", 400);

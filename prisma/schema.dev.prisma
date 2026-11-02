@@ -20,6 +20,8 @@ model User {
   storageQuota  BigInt    @default(5368709120) // 默认 5GB
   storageUsed   BigInt    @default(0)
   status        String    @default("ACTIVE") // ACTIVE | BANNED
+  // 会话吊销版本号（与 schema.prisma 保持一致，见其注释）
+  tokenVersion  Int       @default(0)
   emailVerified DateTime?
   createdAt     DateTime  @default(now())
 

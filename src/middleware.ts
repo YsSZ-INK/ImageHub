@@ -25,7 +25,7 @@ const ANON_IMAGE_ASSET_RE = /^\/api\/images\/[^/]+\/(raw|thumb)$/;
 
 const PROTECTED_PAGE_PREFIX = ["/gallery", "/u/", "/albums", "/images", "/trash", "/settings", "/admin"];
 
-const INK_BG_COUNT = 4; // public/ink-1..4.png
+const INK_BG_COUNT = 4; // public/ink-1..4.webp
 
 /** 每个会话固定一幅水墨图（cookie 锁定），登录页与后台同图 */
 function nextWithInkBg(req: Parameters<Parameters<typeof auth>[0]>[0]) {
@@ -46,9 +46,7 @@ export default auth((req) => {
   const logged = !!req.auth;
   const role = req.auth?.user?.role;
 
-  // 安全员（渗透测试修复）：/api/* 的路径是 /api/admin/...，
-  // 原 startsWith("/admin") 永远不匹配 API 路由，管理接口只靠路由内守卫兜底——
-  // 这里补一道全局预检，防止未来某个 /api/admin 路由漏写守卫。
+  // /api/* 下管理路由的前缀是 /api/admin，此处做全局预检，防止未来某个管理路由漏写守卫。
   // 权限分级：/api/admin/images* 两级管理员可用（图片审核队列），
   // 其余管理接口（用户/设置/存储/备份/日志）仅超级管理员。
   if (logged && path.startsWith("/api/admin")) {
@@ -92,5 +90,9 @@ export default auth((req) => {
 export const config = {
   // 跳过静态资源、NextAuth 自身路由（避免回调被中间件双重处理导致 MissingCSRF）
   // 与 /api/upload、/api/admin/backup/restore（路由自带鉴权；middleware 会缓冲请求体，大文件传输不必要地受限）
-  matcher: ["/((?!api/auth|api/upload|api/admin/backup/restore|_next/static|_next/image|favicon.ico).*)"],
+  // 以及图片直链 raw/thumb（全站 QPS 最高的路径，路由层自带可见性校验，无需边缘再解一遍 JWT）
+  // 与 ink-*.webp 静态背景（无需鉴权/cookie 逻辑，否则每张背景图请求都白跑一次中间件）
+  matcher: [
+    "/((?!api/auth|api/upload|api/admin/backup/restore|api/images/[^/]+/(raw|thumb)|_next/static|_next/image|favicon.ico|ink-[1-4].webp).*)",
+  ],
 };

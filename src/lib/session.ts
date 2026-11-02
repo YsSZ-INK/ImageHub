@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
@@ -6,15 +7,19 @@ import { isAdminRole, isSuper } from "@/lib/roles";
 import type { User } from "@prisma/client";
 
 // 取当前登录用户（回查数据库，封禁/删除即时生效，不能只靠前端隐藏）
-export async function getCurrentUser(): Promise<User | null> {
+// React cache：同一次请求内去重——ConsoleShell 布局与页面各调一次 requireUser 时只查一次库
+export const getCurrentUser = cache(async (): Promise<User | null> => {
   const session = await auth();
   if (!session?.user?.id) return null;
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
   });
   if (!user || user.status === "BANNED") return null;
+  // 会话吊销：JWT 签发时快照 tokenVersion，与库中当前值不一致（密码已变更或被管理员重置）
+  // 则旧会话立即失效，需重新登录。缺省视为 0，与 schema 默认值一致。
+  if (session.user.tokenVersion !== user.tokenVersion) return null;
   return user;
-}
+});
 
 // 页面守卫：未登录重定向到 / 并保留 callbackUrl
 export async function requireUser(): Promise<User> {

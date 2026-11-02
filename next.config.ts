@@ -40,10 +40,18 @@ const nextConfig: NextConfig = {
     return config;
   },
   async headers() {
+    // 水墨背景图：构建期资源、内容不变，长缓存（原图 1.5~2MB，重复协商 304 是无谓开销）
+    const inkImmutable = [
+      ...[1, 2, 3, 4].map((n) => ({
+        source: `/ink-${n}.webp`,
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      })),
+    ];
     return [
+      ...inkImmutable,
       {
-        // 安全员（渗透测试修复）：全站基础安全响应头。
-        // CSP 涉及 Next 内联脚本策略，为避免破坏功能暂不启用（见安全报告建议）。
+        // 全站基础安全响应头。
+        // CSP 涉及 Next 内联脚本策略，为避免破坏功能暂不启用。
         source: "/:path*",
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },

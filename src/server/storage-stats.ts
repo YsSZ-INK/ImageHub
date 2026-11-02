@@ -17,12 +17,22 @@ export type StorageSnapshot = {
 
 // 侧栏存储快照：单次 groupBy 同时取本地与各 R2 槽位占用
 // （回收站中的文件仍占磁盘，故不过滤 deletedAt；size 统一转 number 供前端直接使用）
-export async function storageSnapshot(userId: string, quota: bigint, slotMarkers: string[]): Promise<StorageSnapshot> {
+// filterUserId 非空时仅统计该用户的占用——普通用户不需要看到全站存储分布；
+// 全站聚合（filterUserId 为 null）仅管理员侧调用
+export async function storageSnapshot(
+  userId: string,
+  quota: bigint,
+  slotMarkers: string[],
+  filterUserId?: string | null
+): Promise<StorageSnapshot> {
   const groups = await prisma.image.groupBy({
     by: ["storage"],
     _sum: { size: true },
     _count: true,
-    where: { storage: { in: ["local", ...slotMarkers] } },
+    where: {
+      storage: { in: ["local", ...slotMarkers] },
+      ...(filterUserId ? { userId: filterUserId } : {}),
+    },
   });
   const byKey = new Map(groups.map((g) => [g.storage, g]));
   const pick = (key: string) => {

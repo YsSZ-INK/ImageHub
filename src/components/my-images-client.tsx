@@ -306,6 +306,12 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                   title="外链分享：查看原图并复制链接 / 嵌入代码"
                   onClick={(e) => {
                     e.stopPropagation();
+                    // 私有图片外链对他人无效：点击时提醒先去改可见性
+                    if (img.visibility === "PRIVATE") {
+                      toast.warning("该图片为私有：外链目前只有你自己能打开", {
+                        description: "如需对外分享，请先把可见性设为「公开」。",
+                      });
+                    }
                     setShareFor(img);
                   }}
                 >
@@ -327,7 +333,7 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                   </span>
                 ) : (
                   <span
-                    className="inline-flex h-4 w-full items-center justify-center rounded bg-muted px-0.5 text-[0.625rem] leading-none font-medium text-muted-foreground"
+                    className="inline-flex h-4 w-full items-center justify-center rounded bg-slate-500/15 px-0.5 text-[0.625rem] leading-none font-medium text-slate-600 dark:text-slate-400"
                     title={img.status === "PENDING" ? "审核通过后才能进入公共画廊" : "未进入公共画廊（选中后点「进入画廊」）"}
                   >
                     未入
@@ -365,7 +371,7 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                 )}
                 {/* 文件大小：与其他格相同的方块胶囊样式 */}
                 <span
-                  className="inline-flex h-4 w-full items-center justify-center rounded bg-muted px-0.5 text-[0.625rem] leading-none tabular-nums text-muted-foreground"
+                  className="inline-flex h-4 w-full items-center justify-center rounded bg-teal-500/15 px-0.5 text-[0.625rem] leading-none tabular-nums text-teal-600 dark:text-teal-400"
                   title="文件大小"
                 >
                   {formatBytes(img.size)}

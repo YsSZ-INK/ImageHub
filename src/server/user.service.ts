@@ -27,13 +27,21 @@ function hashToken(token: string) {
 export async function registerUser(input: z.infer<typeof registerSchema>): Promise<User> {
   const email = input.email.toLowerCase();
   const existsEmail = await prisma.user.findUnique({ where: { email } });
-  if (existsEmail) throw new AppError("该邮箱已被注册", 409);
   const existsName = await prisma.user.findUnique({ where: { name: input.name } });
-  if (existsName) throw new AppError("用户名已被占用", 409);
+  // 邮箱与用户名合并为同一条文案：分开提示等于提供了精确探测
+  // 「某邮箱是否已注册」的接口（账号枚举，可为钓鱼/撞库提供素材）
+  if (existsEmail || existsName) throw new AppError("邮箱或用户名已被占用", 409);
 
   const passwordHash = await bcrypt.hash(input.password, 12);
   // 首个注册用户自动成为超级管理员（站长，生产环境无 seed 时用于引导）；后续管理员由其在用户管理中设置
-  const role = (await prisma.user.count()) === 0 ? "SUPERADMIN" : "USER";
+  const first = (await prisma.user.count()) === 0;
+  // 首注册门控：部署方设置 SETUP_TOKEN 后，空库首次注册（将自动成为超级管理员）
+  // 必须携带匹配令牌，防止公网部署后注册入口被陌生人抢先占用；
+  // 非空库忽略该字段（正常注册不受影响），未设置环境变量则不启用门控。
+  if (first && process.env.SETUP_TOKEN && input.setupToken !== process.env.SETUP_TOKEN) {
+    throw new AppError("本站已启用初始化保护：首次注册需携带与 SETUP_TOKEN 一致的 setupToken 字段", 403);
+  }
+  const role = first ? "SUPERADMIN" : "USER";
   const user = await prisma.user.create({
     data: { email, name: input.name, passwordHash, role },
   });
@@ -92,7 +100,8 @@ export async function resetPassword(input: z.infer<typeof resetPasswordSchema>) 
   if (row.expiresAt < new Date()) throw new AppError("链接已过期", 400);
   const passwordHash = await bcrypt.hash(input.password, 12);
   await prisma.$transaction([
-    prisma.user.update({ where: { id: row.userId }, data: { passwordHash } }),
+    // 重置成功后递增 tokenVersion，吊销该用户全部旧 JWT 会话
+    prisma.user.update({ where: { id: row.userId }, data: { passwordHash, tokenVersion: { increment: 1 } } }),
     prisma.token.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
   ]);
 }
@@ -113,7 +122,11 @@ export async function changePassword(user: User, input: z.infer<typeof changePas
   const valid = await bcrypt.compare(input.currentPassword, user.passwordHash);
   if (!valid) throw new AppError("当前密码不正确", 400);
   const passwordHash = await bcrypt.hash(input.newPassword, 12);
-  await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+  // 改密后递增 tokenVersion，吊销该用户全部旧 JWT 会话（其他设备需重新登录）
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { passwordHash, tokenVersion: { increment: 1 } },
+  });
 }
 
 export async function updateAvatar(user: User, buf: Buffer): Promise<User> {

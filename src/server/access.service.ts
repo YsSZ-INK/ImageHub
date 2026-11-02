@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
 import { logActivity } from "@/server/audit.service";
+import { notifyUserById } from "@/lib/mailer";
 import type { Viewer } from "@/server/image.service";
 
 /**
@@ -24,6 +25,8 @@ export type UserDirectoryEntry = {
   name: string;
   avatarUrl: string | null;
   createdAt: string;
+  // 我发给该用户的申请记录 id（pendingFromMe 时用于在卡片上取消申请）
+  requestId: string | null;
   // 与当前登录用户的关系：none 无 | pendingFromMe 我已申请待批 | pendingToMe 对方向我申请（去个人中心审批）
   // canViewThem 对方已授权我（可浏览） | grantedToMe 我已授权对方
   relation: "none" | "pendingFromMe" | "pendingToMe" | "canViewThem" | "grantedToMe";
@@ -38,23 +41,24 @@ export async function listUserDirectory(viewer: Viewer): Promise<UserDirectoryEn
   });
   const rels = await prisma.imageAccessRequest.findMany({
     where: { OR: [{ requesterId: viewer.id }, { ownerId: viewer.id }] },
-    select: { requesterId: true, ownerId: true, status: true },
+    select: { id: true, requesterId: true, ownerId: true, status: true },
   });
   const key = (a: string, b: string) => `${a}>${b}`;
-  const relMap = new Map(rels.map((r) => [key(r.requesterId, r.ownerId), r.status]));
+  const relMap = new Map(rels.map((r) => [key(r.requesterId, r.ownerId), r]));
   return users.map((u) => {
     const mine = relMap.get(key(viewer.id, u.id)); // 我申请看 ta
     const theirs = relMap.get(key(u.id, viewer.id)); // ta 申请看我
     let relation: UserDirectoryEntry["relation"] = "none";
-    if (mine === "APPROVED") relation = "canViewThem";
-    else if (mine === "PENDING") relation = "pendingFromMe";
-    else if (theirs === "PENDING") relation = "pendingToMe";
-    else if (theirs === "APPROVED") relation = "grantedToMe";
+    if (mine?.status === "APPROVED") relation = "canViewThem";
+    else if (mine?.status === "PENDING") relation = "pendingFromMe";
+    else if (theirs?.status === "PENDING") relation = "pendingToMe";
+    else if (theirs?.status === "APPROVED") relation = "grantedToMe";
     return {
       id: u.id,
       name: u.name,
       avatarUrl: u.avatarUrl,
       createdAt: u.createdAt.toISOString(),
+      requestId: mine?.id ?? null,
       relation,
     };
   });
@@ -76,11 +80,27 @@ export async function requestAccess(viewer: Viewer, targetId: string) {
       where: { id: rel.id },
       data: { status: "PENDING", respondedAt: null },
     });
+    void notifyAccessRequested(viewer.id, targetId);
     return { status: updated.status };
   }
   await prisma.imageAccessRequest.create({ data: { requesterId: viewer.id, ownerId: targetId } });
   await logActivity(viewer.id, "access", `向 ${target.name} 申请查看图片`);
+  void notifyAccessRequested(viewer.id, targetId);
   return { status: "PENDING" };
+}
+
+// 申请邮件：通知被申请人到「交换图片 → 图片访问」审批（失败不影响主流程）
+async function notifyAccessRequested(requesterId: string, ownerId: string) {
+  try {
+    const requester = await prisma.user.findUnique({ where: { id: requesterId }, select: { name: true } });
+    await notifyUserById(
+      ownerId,
+      "【ImageHub】新的图片查看申请",
+      `${requester?.name ?? "有用户"} 申请查看你的图片。\n请到「交换图片 → 图片访问」页签审批。`
+    );
+  } catch (e) {
+    console.error("[mail] 查看申请通知失败:", e);
+  }
 }
 
 export type AccessRequestDTO = {
@@ -114,9 +134,18 @@ export async function listMyAccess(viewer: Viewer) {
 }
 
 // 审批：owner 同意 / 拒绝收到的申请；revoke 为 owner 撤销已授权（记录删除，回到无关系）
-export async function respondAccess(viewer: Viewer, requestId: string, action: "approve" | "reject" | "revoke") {
+// cancel 为申请人撤回自己待审批的申请（记录删除，可重新发起）
+export async function respondAccess(viewer: Viewer, requestId: string, action: "approve" | "reject" | "revoke" | "cancel") {
   const req = await prisma.imageAccessRequest.findUnique({ where: { id: requestId } });
   if (!req) throw new AppError("申请不存在", 404);
+  if (action === "cancel") {
+    if (req.requesterId !== viewer.id) throw new AppError("无权处理该申请", 403);
+    if (req.status !== "PENDING") throw new AppError("该申请已处理，无法取消", 400);
+    const owner = await prisma.user.findUnique({ where: { id: req.ownerId }, select: { name: true } });
+    await prisma.imageAccessRequest.delete({ where: { id: requestId } });
+    await logActivity(viewer.id, "access", `取消了向 ${owner?.name ?? "对方"} 发起的查看申请`);
+    return { status: "CANCELLED" };
+  }
   if (req.ownerId !== viewer.id) throw new AppError("无权处理该申请", 403);
   const other = await prisma.user.findUnique({ where: { id: req.requesterId }, select: { name: true } });
   const who = other?.name ?? "对方";

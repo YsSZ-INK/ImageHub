@@ -6,8 +6,8 @@ import { cookies } from "next/headers";
 const NOISE =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
 
-// 与登录页同一批水墨图
-const INK_BACKGROUNDS = ["/ink-1.png", "/ink-2.png", "/ink-3.png", "/ink-4.png"];
+// 与登录页同一批水墨图（WebP：原图 PNG 1.5~2MB，转码后体积降一个数量级）
+const INK_BACKGROUNDS = ["/ink-1.webp", "/ink-2.webp", "/ink-3.webp", "/ink-4.webp"];
 
 /** 页面背景：与登录页同一幅水墨图（由 middleware 经 ink-bg cookie 会话固定）+ 轻遮罩 + 纸纹 */
 export async function InkBackdrop() {

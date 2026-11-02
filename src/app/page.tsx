@@ -18,8 +18,8 @@ const FEATURES = [
   { icon: ShieldCheck, text: "管理后台与开放 API" },
 ];
 
-// 水墨背景图池：每次进入登录页随机一幅
-const BG_IMAGES = ["/ink-1.png", "/ink-2.png", "/ink-3.png", "/ink-4.png"];
+// 水墨背景图池：每次进入登录页随机一幅（WebP 转码，体积降一个数量级）
+const BG_IMAGES = ["/ink-1.webp", "/ink-2.webp", "/ink-3.webp", "/ink-4.webp"];
 
 // 首页即登录/注册页（已登录自动跳 /gallery，由中间件完成）
 export default async function HomePage() {

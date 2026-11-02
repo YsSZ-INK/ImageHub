@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { handle, assertSameOrigin, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
 import { completeChunkUpload } from "@/server/chunk-upload.service";
+import { normalizeUploadVisibility } from "@/server/image.service";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -14,6 +15,13 @@ export const POST = handle(async (req: Request, { params }: { params: Promise<{ 
   if (!rl.success) throw new AppError("操作过于频繁，请稍后再试", 429);
 
   const { id } = await params;
-  const dto = await completeChunkUpload(user, id);
+  // 可选 JSON body 携带可见性（默认私有；公开 = 进画廊候选）
+  let visibility: unknown;
+  try {
+    visibility = (await req.json())?.visibility;
+  } catch {
+    visibility = undefined;
+  }
+  const dto = await completeChunkUpload(user, id, normalizeUploadVisibility(visibility));
   return NextResponse.json({ ok: true, data: dto }, { status: 201 });
 });

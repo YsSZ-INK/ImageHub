@@ -8,10 +8,11 @@ import { prisma } from "@/lib/db";
 import { AppError } from "@/lib/api";
 import { isAdminRole } from "@/lib/roles";
 import { logActivity } from "@/server/audit.service";
+import { notifyAdmins } from "@/lib/mailer";
 import { storageRoot } from "@/lib/storage/local";
 import { processAndStoreImage, processAndStoreVideoFile, detectImageMime, detectVideoMime } from "@/lib/image";
 import { localUsageOf } from "@/server/storage-stats";
-import { toDTO, ensureMyAlbum, type ImageDTO } from "./image.service";
+import { toDTO, ensureMyAlbum, type ImageDTO, type UploadVisibility } from "./image.service";
 import type { User } from "@prisma/client";
 
 // 与前端切片大小保持一致
@@ -79,7 +80,20 @@ export async function initChunkUpload(
   if (input.totalChunks !== Math.ceil(input.size / CHUNK_SIZE)) {
     throw new AppError("分片数与文件大小不匹配", 400);
   }
+  // 先清过期会话再预检，避免被僵尸会话误判为「并行过多」
   await cleanupExpiredSessions();
+  // 创建会话时预检配额与并行会话数：若拖到 complete 才查配额，可并行创建大量会话、
+  // 囤积磁盘分片（单会话上限 maxBytes）后永不 complete，白占磁盘与内存元数据。
+  const [used, openSessions] = await Promise.all([
+    localUsageOf(user.id),
+    prisma.uploadSession.count({ where: { userId: user.id } }),
+  ]);
+  if (openSessions >= 3) {
+    throw new AppError("并行上传会话过多（上限 3），请先完成或等待未完成会话过期", 429);
+  }
+  if (Number(used) + input.size > Number(user.storageQuota)) {
+    throw new AppError("存储配额不足，请清理空间或联系管理员", 413);
+  }
   const s = await prisma.uploadSession.create({
     data: {
       userId: user.id,
@@ -113,7 +127,7 @@ export async function listReceivedChunks(user: User, id: string) {
 }
 
 // 合并入库：流式拼 sha256 + 写合并临时文件（内存恒为单片）
-export async function completeChunkUpload(user: User, id: string): Promise<ImageDTO> {
+export async function completeChunkUpload(user: User, id: string, visibility: UploadVisibility = "PRIVATE"): Promise<ImageDTO> {
   const s = await ownSession(id, user);
   const have = new Set(await listPartIndices(chunkDir(id)));
   const missing: number[] = [];
@@ -215,13 +229,20 @@ export async function completeChunkUpload(user: User, id: string): Promise<Image
       sha256: processed.sha256,
       blurhash: processed.blurhash,
       albumId,
-      // 默认私有：不进公共画廊，用户在「我的图片」勾选后才公开（两级管理员上传免审核直接发布）
-      visibility: "PRIVATE",
+      // 默认私有：不进公共画廊；可选友链/公开（公开 = 进画廊候选，普通用户审核通过后才真正展示）
+      visibility,
       status: isAdminRole(user.role) ? "PUBLISHED" : "PENDING",
     },
     include: { user: { select: { name: true } } },
   });
 
+  // 普通用户选择公开 = 进画廊申请：邮件提醒管理员审核（失败不影响上传）
+  if (visibility === "PUBLIC" && !isAdminRole(user.role)) {
+    void notifyAdmins(
+      "【ImageHub】新的进画廊申请待审核",
+      `${user.name} 上传了「${processed.filename}」并选择公开（进入画廊），请到后台审核。`
+    );
+  }
   await cleanupSession(id);
   await logActivity(user.id, "upload", "上传了 1 张图片");
   return toDTO(img);

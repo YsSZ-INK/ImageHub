@@ -17,6 +17,8 @@ export const registerSchema = z.object({
     .max(20, "用户名最长 20 个字符")
     .regex(/^[a-zA-Z0-9_\-\u4e00-\u9fa5]+$/, "用户名仅限中英文、数字、下划线和连字符"),
   password: strongPassword,
+  // 首注册门控令牌：部署方设置 SETUP_TOKEN 后，空库首次注册必须携带；其余注册不传即可
+  setupToken: z.string().max(200).optional(),
 });
 
 export const loginSchema = z.object({
@@ -27,7 +29,13 @@ export const loginSchema = z.object({
 
 export const profileSchema = z.object({
   name: registerSchema.shape.name.optional(),
-  avatarUrl: z.string().max(300).optional(),
+  // 头像直接作为 <img src> 使用，仅允许 http(s) 外链
+  // （挡住 data:、javascript: 等任意协议注入；空串表示清除头像）
+  avatarUrl: z
+    .string()
+    .max(300)
+    .refine((v) => v === "" || /^https?:\/\//i.test(v), "头像地址须为 http(s) 链接")
+    .optional(),
 });
 
 export const changePasswordSchema = z.object({

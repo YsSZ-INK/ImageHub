@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { handle, assertSameOrigin, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
 import { getSettings, envMaxUploadMB } from "@/lib/settings";
-import { uploadImages, assertAlbumAccess } from "@/server/image.service";
+import { uploadImages, assertAlbumAccess, normalizeUploadVisibility } from "@/server/image.service";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -19,6 +19,17 @@ export const POST = handle(async (req: Request) => {
   const maxMB = Math.min(settings.maxUploadMB, envMaxUploadMB() || settings.maxUploadMB);
   const maxBytes = maxMB * 1024 * 1024;
 
+  // Content-Length 预检：formData() 会把整个请求体先读入内存再逐文件校验，
+  // 超大请求体可能撑爆内存；上限取 20 文件 × 单文件上限 + 1MB 表单开销。
+  // 头缺失（chunked 传输）时无法判定，放行交由后续逐文件校验兜底。
+  const clRaw = req.headers.get("content-length");
+  if (clRaw) {
+    const cl = Number(clRaw);
+    if (Number.isFinite(cl) && cl > maxBytes * 20 + 1024 * 1024) {
+      throw new AppError("请求体过大", 413);
+    }
+  }
+
   const form = await req.formData();
   const files = form.getAll("file").filter((f): f is File => f instanceof File);
   if (files.length === 0) throw new AppError("缺少文件", 400);
@@ -28,6 +39,8 @@ export const POST = handle(async (req: Request) => {
   const albumIdRaw = form.get("albumId");
   const albumId = typeof albumIdRaw === "string" && albumIdRaw ? albumIdRaw : null;
   await assertAlbumAccess(user, albumId);
+  // 可选可见性：默认私有；公开 = 进画廊候选（普通用户仍需审核）
+  const visibility = normalizeUploadVisibility(form.get("visibility"));
 
   const payloads: { buf: Buffer; name: string; contentType: string }[] = [];
   for (const f of files) {
@@ -37,7 +50,7 @@ export const POST = handle(async (req: Request) => {
     payloads.push({ buf, name: f.name || "image", contentType: f.type });
   }
 
-  const { results } = await uploadImages(user, payloads, { albumId });
+  const { results } = await uploadImages(user, payloads, { albumId, visibility });
   const successCount = results.filter((r) => !("error" in r)).length;
   return NextResponse.json({ ok: true, data: { results, successCount } }, { status: successCount > 0 ? 201 : 400 });
 });

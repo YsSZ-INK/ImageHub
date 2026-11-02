@@ -53,7 +53,9 @@ services:
       start_period: 40s
     environment:
       SITE_URL: ${SITE_URL:-http://localhost:3000}
-      AUTH_SECRET: ${AUTH_SECRET:-please-change-me-32chars-minimum}
+      # AUTH_SECRET 必须由部署方显式提供（公开缺省值等于人人可伪造会话），缺失时 compose 直接报错退出，
+      # 强制在 .env 中生成真实密钥
+      AUTH_SECRET: ${AUTH_SECRET:?请在 .env 中设置 AUTH_SECRET（执行 openssl rand -base64 32 生成）}
       AUTH_TRUST_HOST: "true"
       DATABASE_URL: postgresql://imagehub:${POSTGRES_PASSWORD:-imagehub-pass-change-me}@postgres:5432/imagehub
       LOCAL_STORAGE_DIR: /app/storage
@@ -64,6 +66,9 @@ services:
       REDIS_URL: ${REDIS_URL:-}
       # 反代部署时在 .env 设 TRUST_PROXY=1：限流按真实客户端 IP 计数（默认不信任代理头，防伪造轮换绕过）
       TRUST_PROXY: ${TRUST_PROXY:-}
+      # 可选首注册门控——设置后，空库状态下的首次注册（将自动成为超级管理员）
+      # 必须在请求体携带一致的 setupToken 字段，防止公网部署后注册入口被陌生人抢先占用；留空不启用
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
 
 volumes:
   postgres_data:
