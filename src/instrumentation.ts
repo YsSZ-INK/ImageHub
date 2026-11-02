@@ -23,6 +23,9 @@ function assertAuthSecret() {
 
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // next build 的预渲染阶段同样会执行本钩子，此时还没有运行时环境变量与数据库，
+    // 密钥校验和同步循环都应留到容器真正启动时再做
+    if (process.env.NEXT_PHASE === "phase-production-build") return;
     assertAuthSecret();
     await import("@/server/r2-sync.service").then((m) => m.startR2SyncLoop());
   }

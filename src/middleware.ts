@@ -93,6 +93,6 @@ export const config = {
   // 以及图片直链 raw/thumb（全站 QPS 最高的路径，路由层自带可见性校验，无需边缘再解一遍 JWT）
   // 与 ink-*.webp 静态背景（无需鉴权/cookie 逻辑，否则每张背景图请求都白跑一次中间件）
   matcher: [
-    "/((?!api/auth|api/upload|api/admin/backup/restore|api/images/[^/]+/(raw|thumb)|_next/static|_next/image|favicon.ico|ink-[1-4].webp).*)",
+    "/((?!api/auth|api/upload|api/admin/backup/restore|api/images/[^/]+/(?:raw|thumb)|_next/static|_next/image|favicon.ico|ink-[1-4].webp).*)",
   ],
 };
