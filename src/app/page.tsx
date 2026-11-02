@@ -15,7 +15,7 @@ const FEATURES = [
   { icon: Lock, text: "图片严格私有，所有访问需登录" },
   { icon: Images, text: "相册 · 瀑布流画廊" },
   { icon: Upload, text: "拖拽 / 粘贴上传，自动缩略图" },
-  { icon: ShieldCheck, text: "管理后台与开放 API" },
+  { icon: ShieldCheck, text: "管理后台与角色权限" },
 ];
 
 // 水墨背景图池：每次进入登录页随机一幅（WebP 转码，体积降一个数量级）
