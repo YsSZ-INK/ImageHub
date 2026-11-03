@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
@@ -13,7 +13,6 @@ import Link from "next/link";
 
 // 首页登录/注册表单
 export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
-  const router = useRouter();
   const params = useSearchParams();
   // callbackUrl 仅接受站内相对路径：挡掉 //evil.com、/\evil.com 这类
   // 被浏览器视为协议相对地址的外站跳转（开放重定向钓鱼）
@@ -27,11 +26,13 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
   const [regData, setRegData] = useState({ email: "", name: "", password: "" });
   const [loading, setLoading] = useState(false);
 
-  // 登录成功后要跳转的页面提前预取：用户填写账号密码的这段时间里把目标页的数据准备好，
-  // 登录完成即可直接渲染，省掉一次「等跳转 → 等服务端渲染」的空白期
-  useEffect(() => {
-    router.prefetch(callbackUrl);
-  }, [router, callbackUrl]);
+  // 登录成功后整页跳转（而不是 router.push 软导航）：
+  // 软导航会复用登录前的客户端路由状态，可能出现「登录已成功、页面却停在原地看着没反应」，
+  // 甚至被中间件按旧状态弹回登录页（表现为表单被重置、密码被清空）。
+  // 整页跳转让新会话 Cookie 直接从服务端重新渲染，行为确定。
+  function gotoAfterAuth() {
+    window.location.assign(callbackUrl);
+  }
 
   async function doLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -60,8 +61,7 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
           toast.error("登录已通过，但会话没有保存：请检查浏览器是否禁用了 Cookie，或反向代理是否拦截了 Set-Cookie");
           return;
         }
-        // 直接进入目标页；不再额外 refresh（那会对当前登录页再发一次 RSC 请求，纯属浪费）
-        router.push(callbackUrl);
+        gotoAfterAuth();
       }
     } catch {
       // 网络中断 / 反向代理 502 / 移动端切换网络时 fetch 抛错：
@@ -94,7 +94,7 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
         redirect: false,
       });
       if (!login?.error) {
-        router.push(callbackUrl);
+        gotoAfterAuth();
       }
     } catch {
       // 注册接口或随后的自动登录请求抛错时同样要有可见反馈
