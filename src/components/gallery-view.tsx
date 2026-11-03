@@ -3,14 +3,16 @@
 import { useState } from "react";
 import { LayoutGrid, Columns3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ImageGrid, EmptyState } from "@/components/image-grid";
+import { ImageGrid, EmptyState, GridSkeleton } from "@/components/image-grid";
 import { Pager } from "@/components/pager";
 import { useCursorPager } from "@/lib/use-cursor-pager";
 import type { ImageDTO } from "@/server/image.service";
 
-// 画廊视图：方格/瀑布流切换 + 翻页浏览（上一页/下一页 + 页码跳转，每页 60 张）
-// 默认方格：等比方格行对齐，配合每页 60 张（列数可整除）不会在右下角留下空位；
-// 瀑布流按列高均衡分栏，末列天然可能短一截，需要时再手动切换
+// 画廊视图：方格/瀑布流切换 + 翻页浏览（上一页/下一页 + 页码跳转）
+// 默认方格：等比方格行对齐，配合每页 24 张（2/4/6 列可整除）不会在右下角留下空位；
+// 瀑布流按列高均衡分栏，末列天然可能短一截，需要时再手动切换。
+// initialItems 可省略：省略时先渲染骨架，再由 useCursorPager 客户端拉取首屏，
+// 用于「页面框架先出来、图片随后加载」的场景（如登录后的画廊页）
 export function GalleryView({
   initialItems,
   initialCursor,
@@ -19,19 +21,19 @@ export function GalleryView({
   emptyDescription,
   showOwner = false,
 }: {
-  initialItems: ImageDTO[];
-  initialCursor: string | null;
+  initialItems?: ImageDTO[];
+  initialCursor?: string | null;
   query: Record<string, string | undefined>;
   emptyTitle?: string;
   emptyDescription?: string;
   showOwner?: boolean;
 }) {
   const [layout, setLayout] = useState<"waterfall" | "grid">("grid");
-  const { items, page, hasNext, loading, gotoPage } = useCursorPager(query, { initialItems, initialCursor, take: 60 });
+  const { items, page, hasNext, loading, gotoPage } = useCursorPager(query, { initialItems, initialCursor });
 
-  if (items.length === 0) {
-    return <EmptyState title={emptyTitle} description={emptyDescription} />;
-  }
+  // 首屏数据未到：先给骨架，避免闪现「画廊还是空的」
+  if (items.length === 0 && loading) return <GridSkeleton />;
+  if (items.length === 0) return <EmptyState title={emptyTitle} description={emptyDescription} />;
 
   return (
     <div className="space-y-4">

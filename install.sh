@@ -10,20 +10,21 @@
 #   2) 服务端口          默认 3000（自动校验 1-65535）
 #   3) 端口绑定地址      默认 127.0.0.1（仅本机，配合反向代理）
 #   4) 站点对外访问地址  默认 http://公网IP:端口
-#   5) 数据库密码        留空自动生成 64 位随机密码
-#   6) 图片上传上限      默认 512 MB（1-512）
-#   7) 是否自动转 WebP   默认否
-#   8) 是否启用 Redis    默认不启用（限流自动降级进程内存）
+#   5) 登录回调地址      AUTH_URL，回车=自动推断；域名 + HTTPS 部署建议填 https://域名
+#   6) 数据库密码        留空自动生成 64 位随机密码
+#   7) 图片上传上限      默认 512 MB（1-512）
+#   8) 是否自动转 WebP   默认否
+#   9) 是否启用 Redis    默认不启用（限流自动降级进程内存）
 #   最后确认配置再开始安装
-#   启动成功后 9) 引导立即注册站长账号：第一个注册的账号自动成为超级管理员，
+#   启动成功后 10) 引导立即注册站长账号：第一个注册的账号自动成为超级管理员，
 #   请求会自动携带脚本生成的首注册门控令牌（SETUP_TOKEN），防止服务就绪到
 #   站长注册之间的窗口被公网陌生人抢注超管。
 #   会话密钥 AUTH_SECRET 与 SETUP_TOKEN 始终自动随机生成，不询问。
 #
 # curl | bash 同样可以交互：脚本通过 /dev/tty 读取输入，不依赖标准输入；
 # 只有在完全没有终端（CI / 远程非交互）时才全部取默认值，可用环境变量预设：
-#   SITE_URL=https://img.example.com PORT=8080 IMAGEHUB_DIR=/opt/ImageHub \
-#   BIND_IP=0.0.0.0 POSTGRES_PASSWORD=YourPass123 \
+#   SITE_URL=https://img.example.com AUTH_URL=https://img.example.com PORT=8080 \
+#   IMAGEHUB_DIR=/opt/ImageHub BIND_IP=0.0.0.0 POSTGRES_PASSWORD=YourPass123 \
 #   MAX_UPLOAD_MB=256 CONVERT_TO_WEBP=1 REDIS_ENABLED=1 bash install.sh
 # ============================================================
 set -euo pipefail
@@ -129,15 +130,15 @@ gen_key() { openssl rand -hex 32 2>/dev/null || od -An -N16 -tx1 /dev/urandom | 
 
 # ---------- 1) 安装目录 ----------
 INSTALL_DIR="${IMAGEHUB_DIR:-}"
-ask INSTALL_DIR "1/8 安装目录" "$HOME/ImageHub"
+ask INSTALL_DIR "1/9 安装目录" "$HOME/ImageHub"
 case "$INSTALL_DIR" in "~"*) INSTALL_DIR="${INSTALL_DIR/#\~/$HOME}" ;; esac
 
 # ---------- 2) 服务端口 ----------
-ask_num PORT "2/8 服务端口" "$DEFAULT_PORT" 1 65535
+ask_num PORT "2/9 服务端口" "$DEFAULT_PORT" 1 65535
 
 # ---------- 3) 端口绑定地址 ----------
 # 绑定地址决定暴露与否：Docker 发布端口不走系统防火墙（iptables DOCKER 链 / Docker Desktop 放行）
-ask BIND_IP "3/8 端口绑定地址（127.0.0.1=仅本机，0.0.0.0=对外网开放）" "127.0.0.1"
+ask BIND_IP "3/9 端口绑定地址（127.0.0.1=仅本机，0.0.0.0=对外网开放）" "127.0.0.1"
 case "$BIND_IP" in 127.0.0.1|0.0.0.0) ;; *) warn "非常规绑定地址：${BIND_IP}（一般填 127.0.0.1 或 0.0.0.0）" ;; esac
 
 # ---------- 4) 站点对外访问地址 ----------
@@ -145,25 +146,35 @@ if [ -z "${SITE_URL:-}" ]; then
   PUB_IP="$(curl -4 -fsS --max-time 3 https://ifconfig.me 2>/dev/null || true)"
   if [ -n "$PUB_IP" ]; then SITE_URL="http://${PUB_IP}:${PORT}"; else SITE_URL="http://127.0.0.1:${PORT}"; fi
 fi
-ask SITE_URL "4/8 站点对外访问地址" "$SITE_URL"
+ask SITE_URL "4/9 站点对外访问地址" "$SITE_URL"
 case "$SITE_URL" in http://*|https://*) ;; *) SITE_URL="http://${SITE_URL}" ;; esac
 
-# ---------- 5) 数据库密码 ----------
+# ---------- 5) 登录回调地址（AUTH_URL） ----------
+# Auth.js 用它对外的协议与域名生成回调。反向代理若没传 X-Forwarded-Proto，
+# 会按 http 生成回调，https 页面下点「登录」请求会被浏览器拦截（表现为没反应）。
+# 留空 = 按请求头自动推断（本机 / 局域网直连最省事）；域名 + HTTPS 反代部署建议显式填写。
+ask AUTH_URL "5/9 登录回调地址（HTTPS 反代部署填 https://你的域名；回车=自动推断）" ""
+if [ -n "$AUTH_URL" ]; then
+  case "$AUTH_URL" in http://*|https://*) ;; *) AUTH_URL="https://${AUTH_URL}" ;; esac
+  AUTH_URL="${AUTH_URL%/}"
+fi
+
+# ---------- 6) 数据库密码 ----------
 if [ -z "${POSTGRES_PASSWORD:-}" ]; then
   _p=""
-  read_line "5/8 数据库密码（留空自动生成 64 位随机密码）: " secret && _p="$_ANS"
+  read_line "6/9 数据库密码（留空自动生成 64 位随机密码）: " secret && _p="$_ANS"
   POSTGRES_PASSWORD="${_p:-$(gen_key)}"
 fi
 [ "${#POSTGRES_PASSWORD}" -ge 8 ] || err "数据库密码至少 8 位"
 
-# ---------- 6) 图片上传上限 ----------
-ask_num MAX_UPLOAD_MB "6/8 图片单文件上传上限（MB）" "512" 1 512
+# ---------- 7) 图片上传上限 ----------
+ask_num MAX_UPLOAD_MB "7/9 图片单文件上传上限（MB）" "512" 1 512
 
-# ---------- 7) 是否自动转 WebP ----------
-ask_yes CONVERT_TO_WEBP "7/8 把 jpg/png 自动转成 WebP 存储（省空间，画质轻微变化）？"
+# ---------- 8) 是否自动转 WebP ----------
+ask_yes CONVERT_TO_WEBP "8/9 把 jpg/png 自动转成 WebP 存储（省空间，画质轻微变化）？"
 
-# ---------- 8) Redis ----------
-ask_yes REDIS_ENABLED "8/8 启用 Redis 缓存（多实例部署或需限流计数重启不丢失时建议启用）？"
+# ---------- 9) Redis ----------
+ask_yes REDIS_ENABLED "9/9 启用 Redis 缓存（多实例部署或需限流计数重启不丢失时建议启用）？"
 
 # ---------- 生成会话密钥与首注册门控令牌（不询问，保证强度） ----------
 AUTH_SECRET="$(gen_key)"
@@ -176,6 +187,7 @@ log "──────── 安装配置确认 ────────"
 log "安装目录　　：${INSTALL_DIR}"
 log "端口绑定　　：${BIND_IP}:${PORT}（容器内 3000）"
 log "站点地址　　：${SITE_URL}"
+log "登录回调　　：$([ -n "$AUTH_URL" ] && echo "$AUTH_URL" || echo '自动推断（跟随访问地址）')"
 log "数据库密码　：${POSTGRES_PASSWORD:0:4}********（已隐藏）"
 log "上传上限　　：${MAX_UPLOAD_MB} MB（视频不设上限）"
 log "WebP 转换　：$([ -n "$CONVERT_TO_WEBP" ] && echo '开启' || echo '关闭（保留原格式）')"
@@ -197,6 +209,11 @@ cd "$INSTALL_DIR"
 
 if [ -f .env ]; then
   warn ".env 已存在，沿用现有配置（如需重置请删除 .env 后重跑）"
+  # 老版本生成的 .env 没有 AUTH_URL：本次问答填了就补一行（留空则维持自动推断）
+  if [ -n "$AUTH_URL" ] && ! grep -qE '^AUTH_URL=' .env; then
+    printf 'AUTH_URL="%s"\n' "$AUTH_URL" >> .env
+    log "已追加 AUTH_URL（${AUTH_URL}）"
+  fi
   if [ -n "$REDIS_ENABLED" ] && ! grep -qE '^REDIS_URL=' .env; then
     printf 'REDIS_URL="redis://redis:6379"\n' >> .env
     log "已追加 REDIS_URL"
@@ -212,6 +229,7 @@ if [ -f .env ]; then
 else
   {
     echo "SITE_URL=\"${SITE_URL}\""
+    if [ -n "$AUTH_URL" ]; then echo "AUTH_URL=\"${AUTH_URL}\""; fi
     echo "AUTH_SECRET=\"${AUTH_SECRET}\""
     echo "PORT=\"${PORT}\""
     echo "BIND_IP=\"${BIND_IP}\""
@@ -271,7 +289,7 @@ print_manual_hint() {
 
 register_owner() {
   log ""
-  log "──────── 9/9 注册站长账号 ────────"
+  log "──────── 10/10 注册站长账号 ────────"
   log "第一个注册的账号将自动成为超级管理员（站长），建议现在完成注册。"
   _go=""
   read_line "现在注册站长账号？[Y/n]: " && _go="$_ANS"
