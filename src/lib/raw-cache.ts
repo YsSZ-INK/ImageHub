@@ -95,3 +95,8 @@ export async function getRawCached(key: string, loader: () => Promise<Buffer>): 
   inflight.set(key, task);
   return task;
 }
+
+// 图片原位重写（旋转）后失效指定 key 的原图磁盘缓存，下次访问重新回源
+export function invalidateRaw(key: string) {
+  void fs.rm(cachePath(key), { force: true }).catch(() => {});
+}

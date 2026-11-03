@@ -501,7 +501,14 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
       </Dialog>
       {/* 灯箱放大查看（当前页内可左右切换，ESC 关闭） */}
       {preview !== null && (
-        <Lightbox images={items} index={preview} onClose={() => setPreview(null)} onNavigate={setPreview} />
+        <Lightbox
+          images={items}
+          index={preview}
+          onClose={() => setPreview(null)}
+          onNavigate={setPreview}
+          canRotate
+          onRotated={() => loadPage(page)}
+        />
       )}
     </div>
   );

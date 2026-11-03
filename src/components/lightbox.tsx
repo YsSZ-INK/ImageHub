@@ -4,22 +4,27 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { X, ChevronLeft, ChevronRight, Download, Link2, Info, Loader2 } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Download, Link2, Info, Loader2, RotateCcw, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatBytes, formatDate, buildSnippets, preloadRaw } from "@/lib/utils";
 import type { ImageDTO } from "@/server/image.service";
 
-// 灯箱：键盘可操作（← → 切换，ESC 关闭），图片带 alt
+// 灯箱：键盘可操作（← → 切换，ESC 关闭），图片带 alt；
+// canRotate 开启后（本人图片）提供左右旋转 90°，旋转后原位写回并即时刷新
 export function Lightbox({
   images,
   index,
   onClose,
   onNavigate,
+  canRotate,
+  onRotated,
 }: {
   images: ImageDTO[];
   index: number;
   onClose: () => void;
   onNavigate: (i: number) => void;
+  canRotate?: boolean;
+  onRotated?: (img: ImageDTO) => void;
 }) {
   const router = useRouter();
   const [showInfo, setShowInfo] = useState(false);
@@ -31,14 +36,18 @@ export function Lightbox({
   const [hdLoaded, setHdLoaded] = useState(false);
   // 原图回源失败（网络差超时）自动重试：key 变化触发重新加载，最多 2 次
   const [hdRetry, setHdRetry] = useState(0);
-  const img = images[index];
+  // 旋转后的本地覆盖：id → 旋转接口返回的新 DTO（带新 version 的 URL），灯箱立即显示，无需等列表刷新
+  const [rotated, setRotated] = useState<Record<string, ImageDTO>>({});
+  const [rotating, setRotating] = useState(false);
+  const base = images[index];
+  const img = (base && rotated[base.id]) || base;
   const siteUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   useEffect(() => {
     setPreviewLoaded(false);
     setHdLoaded(false);
     setHdRetry(0);
-  }, [img?.id]);
+  }, [img?.rawUrl]);
 
   // 相邻原图预取：显示当前图的同时后台加载前后各一张，翻页即显高清
   useEffect(() => {
@@ -84,6 +93,29 @@ export function Lightbox({
     }
   }
 
+  // 旋转当前图片（左转/右转 90°）：成功后用返回值本地覆盖显示，并通知父组件刷新列表数据
+  async function rotate(dir: "left" | "right") {
+    if (!img || rotating) return;
+    setRotating(true);
+    try {
+      const res = await fetch(`/api/images/${img.id}/rotate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dir }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setRotated((r) => ({ ...r, [img.id]: json.data }));
+        onRotated?.(json.data);
+        toast.success(dir === "left" ? "已逆时针旋转 90°" : "已顺时针旋转 90°");
+      } else toast.error(json.error);
+    } catch {
+      toast.error("网络错误，请稍后再试");
+    } finally {
+      setRotating(false);
+    }
+  }
+
   return createPortal(
     <div className="anim-fade-in fixed inset-0 z-50 flex flex-col bg-black/95" role="dialog" aria-label="图片预览">
       <div className="flex items-center justify-between p-3 text-white">
@@ -106,6 +138,32 @@ export function Lightbox({
           >
             <Download className="h-4 w-4" />
           </Button>
+          {canRotate && img.kind !== "video" && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="逆时针旋转"
+                title="逆时针旋转 90°"
+                disabled={rotating}
+                className="text-white hover:bg-white/10"
+                onClick={() => rotate("left")}
+              >
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="顺时针旋转"
+                title="顺时针旋转 90°"
+                disabled={rotating}
+                className="text-white hover:bg-white/10"
+                onClick={() => rotate("right")}
+              >
+                <RotateCw className="h-4 w-4" />
+              </Button>
+            </>
+          )}
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="关闭" className="text-white hover:bg-white/10">
             <X className="h-4 w-4" />
           </Button>
@@ -143,7 +201,7 @@ export function Lightbox({
             {!hdLoaded && (
               <img
                 key={`${img.id}-pv`}
-                src={`${img.thumbUrl}?w=2560`}
+                src={`${img.thumbUrl}&w=2560`}
                 alt=""
                 aria-hidden
                 onLoad={() => setPreviewLoaded(true)}

@@ -6,6 +6,9 @@ import { logActivity } from "@/server/audit.service";
 import { notifyAdmins } from "@/lib/mailer";
 import { hasAccessTo } from "@/server/access.service";
 import { getStorageFor } from "@/lib/storage";
+import { invalidateThumb } from "@/lib/thumb-cache";
+import { invalidateRaw } from "@/lib/raw-cache";
+import sharp from "sharp";
 import { processAndStoreImage, processAndStoreVideo, processAndStoreVideoFile, detectVideoMime } from "@/lib/image";
 import { localUsageOf } from "@/server/storage-stats";
 import type { User, Image } from "@prisma/client";
@@ -32,12 +35,16 @@ export type ImageDTO = {
   blurhash: string | null;
   albumId: string | null;
   storage: string;
+  version: number;
   thumbUrl: string;
   rawUrl: string;
   ownerName?: string;
 };
 
 export function toDTO(img: Image & { user?: { name: string } }): ImageDTO {
+  // 原图/缩略图 URL 带 version 作缓存破绽参数：旋转等原位重写后自增，
+  // 让浏览器跳过 immutable 缓存立即显示新图
+  const v = img.version ?? 0;
   return {
     id: img.id,
     filename: img.filename,
@@ -52,8 +59,9 @@ export function toDTO(img: Image & { user?: { name: string } }): ImageDTO {
     blurhash: img.blurhash,
     albumId: img.albumId,
     storage: img.storage,
-    thumbUrl: `/api/images/${img.id}/thumb`,
-    rawUrl: `/api/images/${img.id}/raw`,
+    version: v,
+    thumbUrl: `/api/images/${img.id}/thumb?v=${v}`,
+    rawUrl: `/api/images/${img.id}/raw?v=${v}`,
     ownerName: img.user?.name,
   };
 }
@@ -481,6 +489,49 @@ export async function updateImage(id: string, viewer: Viewer, data: { filename?:
     await logActivity(viewer.id, "visibility", `把「${img.filename}」设为${VIS_TEXT[data.visibility] ?? data.visibility}`);
   }
   return toDTO(img);
+}
+
+// 旋转照片（仅图片主人/超级管理员）：读取原图 → sharp 旋转 → 原位写回 → 更新宽高 → 失效各级缓存。
+// 90°/270° 旋转会交换宽高；version 自增让原图/缩略图 URL 换新，浏览器跳过 immutable 缓存立即显示新图
+export async function rotateImage(id: string, viewer: Viewer, dir: "left" | "right") {
+  const img = await assertOwnership(id, viewer);
+  if (img.mimeType.startsWith("video/")) throw new AppError("视频不支持旋转", 400);
+  // 动图（GIF）与 AVIF 旋转需重编码/丢帧，仅支持常见静态位图格式
+  if (img.mimeType !== "image/jpeg" && img.mimeType !== "image/png" && img.mimeType !== "image/webp") {
+    throw new AppError("该图片格式暂不支持旋转", 400);
+  }
+
+  const storage = await getStorageFor(img.storage);
+  const raw = await storage.get(img.storageKey);
+  const angle = dir === "left" ? 270 : 90;
+  let pipe = sharp(raw).rotate(angle);
+  if (img.mimeType === "image/jpeg") pipe = pipe.jpeg();
+  else if (img.mimeType === "image/png") pipe = pipe.png();
+  else pipe = pipe.webp();
+  const outBuf = await pipe.toBuffer();
+
+  await storage.put(img.storageKey, outBuf, { contentType: img.mimeType });
+
+  // 90°/270° 交换宽高（正方形交换后数值不变）
+  const swap = img.width !== img.height;
+  const updated = await prisma.image.update({
+    where: { id },
+    data: {
+      width: swap ? img.height : img.width,
+      height: swap ? img.width : img.height,
+      size: outBuf.length,
+      version: { increment: 1 },
+    },
+  });
+
+  // 失效各级缓存：直链快照（Redis/内存）+ 缩略图两级缓存 + 原图磁盘缓存
+  await invalidateImageView(id);
+  invalidateThumb(`${img.storage}:${img.storageKey}:gen400`);
+  invalidateThumb(`${img.storage}:${img.storageKey}:2560`);
+  invalidateRaw(`${img.storage}:${img.storageKey}`);
+
+  await logActivity(viewer.id, "rotate", `把「${img.filename}」${dir === "left" ? "逆时针" : "顺时针"}旋转 90°`);
+  return toDTO(updated);
 }
 
 // 软删除 → 回收站

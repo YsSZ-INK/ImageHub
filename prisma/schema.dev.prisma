@@ -56,6 +56,7 @@ model Image {
   albumId    String?
   postId     String? // 关联的图文动态（发布到动态时挂上）
   deletedAt  DateTime? // 软删除，回收站保留 30 天
+  version    Int       @default(0) // 旋转等原位重写后自增，作为原图/缩略图 URL 的缓存破绽参数
   createdAt  DateTime  @default(now())
 
   user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)

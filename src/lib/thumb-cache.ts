@@ -96,6 +96,12 @@ export function prewriteThumb(key: string, buf: Buffer) {
   void writeDisk(key, buf);
 }
 
+// 图片原位重写（旋转）后失效指定 key 的缩略图缓存（内存 + 磁盘），下次访问按新原图重建
+export function invalidateThumb(key: string) {
+  map.delete(key);
+  void fs.rm(diskPath(key), { force: true }).catch(() => {});
+}
+
 // 一天一清：本地缩略图缓存每天整目录清空一次，之后访问自动从原图重建
 const CLEAN_MS = 24 * 60 * 60 * 1000;
 async function cleanAll() {
