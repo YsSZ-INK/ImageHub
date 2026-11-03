@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { Images, Menu, LogOut } from "lucide-react";
+import { Images, Menu, LogOut, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -45,10 +45,22 @@ export function ConsoleTopBar({ siteName, user, navGroups }: Props) {
   return (
     <header className="sticky top-0 z-40 bg-stone-900 text-stone-50">
       <div className="flex h-12 items-center justify-between px-4 md:px-6">
-        <Link href="/gallery" className="flex items-center gap-2 font-bold">
-          <Images className="h-5 w-5" />
-          <span className="hidden font-display text-base tracking-wide sm:inline">{siteName}</span>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href="/gallery" className="flex items-center gap-2 font-bold">
+            <Images className="h-5 w-5" />
+            <span className="hidden font-display text-base tracking-wide sm:inline">{siteName}</span>
+          </Link>
+          {/* 文档入口：默认指向项目文档站 */}
+          <a
+            href="https://imghub.inskl.com"
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 rounded-md border border-stone-700 px-2 py-1 text-xs text-stone-300 transition-colors hover:border-stone-500 hover:text-stone-50"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">文档</span>
+          </a>
+        </div>
         <span className="absolute left-1/2 hidden -translate-x-1/2 text-sm font-medium tracking-wide sm:inline">
           {title}
         </span>
