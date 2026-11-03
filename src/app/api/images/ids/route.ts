@@ -1,12 +1,14 @@
 import { handle, ok } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
-import { listMyImageIds } from "@/server/image.service";
+import { listMyImageIds, listTrashedImageIds } from "@/server/image.service";
 
 export const runtime = "nodejs";
 
-// 「我的图片」跨页全选：返回当前筛选（可选按存储位置）下全部图片 id（仅本人）
+// 跨页全选：scope=trash 返回回收站全部 id，默认返回「我的图片」全部 id（均可选按存储位置筛选）
 export const GET = handle(async (req: Request) => {
   const viewer = await requireApiUser();
-  const storage = new URL(req.url).searchParams.get("storage") ?? undefined;
+  const sp = new URL(req.url).searchParams;
+  if (sp.get("scope") === "trash") return ok(await listTrashedImageIds(viewer));
+  const storage = sp.get("storage") ?? undefined;
   return ok(await listMyImageIds(viewer, storage));
 });

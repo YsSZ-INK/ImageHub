@@ -24,7 +24,13 @@ export const getCurrentUser = cache(async (): Promise<User | null> => {
 // 页面守卫：未登录重定向到 / 并保留 callbackUrl
 export async function requireUser(): Promise<User> {
   const user = await getCurrentUser();
-  if (!user) redirect("/");
+  if (!user) {
+    // 浏览器还带着有效签名、但服务端校验不通过的旧令牌（改密 / 被封禁 / 账号已删）：
+    // 直接回 / 会被中间件当作已登录再送回 /gallery，形成重定向死循环，因此先清 cookie
+    const session = await auth();
+    if (session?.user?.id) redirect("/api/session/reset");
+    redirect("/");
+  }
   return user;
 }
 

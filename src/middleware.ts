@@ -15,6 +15,7 @@ const PUBLIC_API = [
   "/api/auth",
   "/api/register",
   "/api/account/reset", // POST 请求重置 / PUT 执行重置均匿名
+  "/api/session/reset", // 清理失效会话 cookie（见 session.ts 的重定向防环）
   "/api/health",
 ];
 

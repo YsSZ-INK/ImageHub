@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, Play, Search, ZoomIn } from "lucide-react";
+import { ChevronLeft, Loader2, Play, Search, Upload, ZoomIn } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DateField } from "@/components/date-field";
@@ -14,7 +15,7 @@ import { shortDate } from "@/lib/utils";
 import type { ImageDTO } from "@/server/image.service";
 
 // 日常记录（虚拟相册，仅管理员可见）：自动汇总所有图文动态发布的照片，每张照片带「@上传者 · 时间」标记。
-// 照片不搬家，仍保留在各自相册中；支持按上传者用户名 + 上传时间范围筛选，可组合、可单独使用。
+// 照片随发布移出原相册、统一归入这里；支持按上传者用户名 + 上传时间范围筛选，可组合、可单独使用。
 export function DailyAlbumClient() {
   // 筛选条件：上传者用户名 + 起止日期；变更后 useCursorPager 自动回第一页
   const [owner, setOwner] = useState("");
@@ -29,6 +30,50 @@ export function DailyAlbumClient() {
   });
   const [preview, setPreview] = useState<number | null>(null);
   const hasFilter = owner || from || to;
+
+  // 直接上传到日常记录：文件按站点存储设置写入（对象存储即进桶），上传成功后自动发一条动态，
+  // 图片随之公开并归入本相册（动态接口单条最多 9 张，超出自动分批）
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function uploadToDaily(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    if (!files.length) return;
+    setUploading(true);
+    const ids: string[] = [];
+    let failed = 0;
+    try {
+      for (const f of files) {
+        const form = new FormData();
+        form.append("file", f);
+        const res = await fetch("/api/upload", { method: "POST", body: form });
+        const json = await res.json().catch(() => null);
+        const r = json?.data?.results?.[0];
+        if (json?.ok && r && !r.error) ids.push(r.id);
+        else failed++;
+      }
+      let posted = 0;
+      for (let i = 0; i < ids.length; i += 9) {
+        const batch = ids.slice(i, i + 9);
+        const res = await fetch("/api/posts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ caption: "", imageIds: batch }),
+        });
+        const json = await res.json().catch(() => null);
+        if (json?.ok) posted += batch.length;
+      }
+      if (posted > 0) {
+        toast.success(`已上传 ${posted} 张到日常记录${failed ? `，${failed} 张失败` : ""}`);
+        loadPage(1);
+      } else if (failed > 0) toast.error("上传失败，请重试");
+    } catch {
+      toast.error("上传失败，请重试");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -45,6 +90,13 @@ export function DailyAlbumClient() {
             自动汇总所有图文动态发布的照片，每张照片都带上传者标记
             {total != null ? ` · 共 ${total} 张` : ""}
           </p>
+        </div>
+        {/* 上传入口：照片按站点存储设置写入（配置了对象存储即进桶），并自动发布成动态归入本相册 */}
+        <div className="flex items-center gap-2">
+          <Button onClick={() => fileRef.current?.click()} disabled={uploading} title="上传的照片会按存储设置写入，并自动发布成动态归入日常记录">
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} 上传照片
+          </Button>
+          <input ref={fileRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={uploadToDaily} />
         </div>
       </div>
 

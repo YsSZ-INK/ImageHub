@@ -43,7 +43,7 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
   // 存储位置筛选：空 = 全部；切换后 useCursorPager 自动回第一页重新加载
   const [storage, setStorage] = useState("");
   // 游标分页：翻页/跳页逻辑统一在 hook 内
-  const { items, page, hasNext, loading, loadPage, gotoPage, totalPages } = useCursorPager({
+  const { items, page, hasNext, loading, loadPage, gotoPage, totalPages, total } = useCursorPager({
     scope: "mine",
     ...(storage ? { storage } : {}),
   });
@@ -117,6 +117,9 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
     await runBatch("visibility", { visibility: toPublic ? "PUBLIC" : "PRIVATE" });
   }
 
+  // 全选/取消全选合一：选中数达到当前筛选总数即视为已全选，按钮在两种状态间切换
+  const allPicked = selected.size > 0 && total != null && selected.size >= total;
+
   return (
     <div className="flex min-h-[calc(100vh-6rem)] flex-col space-y-4">
       {/* 存储位置筛选：全部 / 本地磁盘 / 各个存储桶（自定义名） */}
@@ -169,11 +172,16 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                 />
                 <span className="text-sm text-muted-foreground">已选 {selected.size} 张</span>
               </label>
-              <Button size="sm" variant="outline" className="text-sm" disabled={batching} onClick={selectAll} title="选中当前筛选下的所有图片（含未加载页）">
-                全选
-              </Button>
-              <Button size="sm" variant="outline" className="text-sm" disabled={selected.size === 0} onClick={() => setSelected(new Set())} title="清空当前选中">
-                取消全选
+              {/* 全选/取消全选切换按钮：未全选时点击拉取当前筛选下全部图片 id（含未加载页），已全选时点击清空 */}
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-sm"
+                disabled={batching}
+                onClick={() => (allPicked ? setSelected(new Set()) : selectAll())}
+                title={allPicked ? "取消全部选中" : "选中当前筛选下的所有图片（含未加载页）"}
+              >
+                {allPicked ? "取消全选" : "全选"}
               </Button>
               {/* 批量操作栏：常驻显示，未选中时禁用操作（已选计数见左侧勾选框） */}
               <div className="flex flex-wrap items-center gap-2">

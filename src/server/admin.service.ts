@@ -187,7 +187,9 @@ export async function adminPurgeImage(id: string) {
   const storage = await getStorageFor(img.storage);
   await prisma.image.delete({ where: { id } });
   await invalidateImageView(id);
-  await Promise.allSettled([storage.delete(img.storageKey), storage.delete(img.thumbKey)]);
+  // 存储对象删除失败不阻塞记录删除，但要留日志：残留对象可在「站点设置 → 桶内多余文件核对」中清理
+  const removed = await Promise.allSettled([storage.delete(img.storageKey), storage.delete(img.thumbKey)]);
+  for (const r of removed) if (r.status === "rejected") console.error("[storage] 删除存储对象失败:", r.reason);
 }
 
 // 统计面板：核心计数 + 7 天趋势 + 存储分布 + 上传 Top5 + 最近注册

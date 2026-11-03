@@ -68,7 +68,7 @@ export async function listPosts(
 // ============ 发布动态 ============
 // 支持纯文字动态；带图时图片必须属于本人且未删除。
 // 图片随发布立即公开（visibility PUBLIC + status PUBLISHED），无需审核即可在 feed 中展示；
-// 照片留在原相册不搬家——「日常记录」是自动汇总所有人照片的虚拟相册（/albums/daily）。
+// 照片随发布移出原相册，统一归入「日常记录」（/albums/daily）——动态照片不与「我的相册」等普通相册重复出现。
 export async function createPost(
   user: User,
   input: { caption: string; imageIds?: string[] }
@@ -99,6 +99,7 @@ export async function createPost(
           visibility: "PUBLIC", // 进 feed 的图片必须公开
           status: "PUBLISHED", // 发动态免审核：随发布立即公开可见
           postId: created.id,
+          albumId: null, // 移出原相册：动态照片统一归「日常记录」
         },
       });
     }
@@ -106,8 +107,11 @@ export async function createPost(
   });
 
   await logActivity(user.id, "post", ids.length > 0 ? "发布了图文动态" : "发布了文字动态");
-  // 发布把图片行改为公开已发布，失效直链缓存（新公开的图此前可能缓存过「不可见」未命中态；TTL 兜底）
-  if (images.length > 0) await invalidateImageView(...images.map((i) => i.id));
+  if (images.length > 0) {
+    // 图片移出相册后清空引用它们的相册封面（事务外执行，避免 SQLite 写锁），再失效直链缓存
+    await clearAlbumCovers(images.map((i) => i.id));
+    await invalidateImageView(...images.map((i) => i.id));
+  }
 
   const full = await prisma.post.findUnique({
     where: { id: post.id },

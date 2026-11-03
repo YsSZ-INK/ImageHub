@@ -175,3 +175,18 @@ export async function getR2Usage(cfg: S3CompatibleConfig): Promise<{ bytes: numb
   } while (token);
   return { bytes, objects };
 }
+
+// 列出桶内全部对象（key → 大小/最后修改时间）：孤儿文件核对用，逐页拉取
+export async function listR2Objects(cfg: S3CompatibleConfig): Promise<Map<string, { size: number; lastModified: Date }>> {
+  const client = makeS3Client(cfg);
+  const map = new Map<string, { size: number; lastModified: Date }>();
+  let token: string | undefined;
+  do {
+    const res = await client.send(new ListObjectsV2Command({ Bucket: cfg.bucket, ContinuationToken: token }));
+    for (const o of res.Contents ?? []) {
+      if (o.Key) map.set(o.Key, { size: o.Size ?? 0, lastModified: o.LastModified ?? new Date(0) });
+    }
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+  return map;
+}

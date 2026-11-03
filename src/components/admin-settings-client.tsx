@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Unplug, ScrollText } from "lucide-react";
+import { Loader2, Plus, Trash2, Unplug, ScrollText, ImageOff, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,7 @@ import { AdminLogsClient } from "@/components/admin-logs-client";
 import type { R2SlotConfig, SiteSettings } from "@/lib/settings";
 import type { SyncStatus } from "@/server/r2-sync.service";
 import { SLOT_TYPES, slotConfigured, slotDisplayName, type SlotType } from "@/lib/markers";
+import { formatBytes, shortDate } from "@/lib/utils";
 import { PasswordInput } from "@/components/password-input";
 import {
   DropdownMenu,
@@ -91,6 +92,63 @@ function SyncStatusPanel() {
   );
 }
 
+// 桶内对象按「槽位 + key」唯一标识（不同桶可能有同名 key）
+const orphanKey = (slot: string, key: string) => `${slot}|${key}`;
+
+// 对账结果卡片：小缩略图 + 文件名 + 附加信息；图片取不到时显示占位图标
+function ResultCard({
+  src,
+  title,
+  meta,
+  badge,
+  checked,
+  onToggle,
+}: {
+  src: string;
+  title: string;
+  meta: string;
+  badge?: string;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <label className="block cursor-pointer overflow-hidden rounded-lg border">
+      <div className="relative aspect-square bg-muted">
+        <div className="absolute inset-0 flex items-center justify-center text-muted-foreground/40">
+          <ImageOff className="h-5 w-5" />
+        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt={title}
+          loading="lazy"
+          className="relative h-full w-full object-cover"
+          onError={(e) => {
+            e.currentTarget.style.visibility = "hidden";
+          }}
+        />
+        <input
+          type="checkbox"
+          className="absolute left-1.5 top-1.5 h-4 w-4"
+          checked={checked}
+          onChange={onToggle}
+        />
+        {badge && (
+          <span className="absolute right-1.5 top-1.5 rounded bg-black/60 px-1 text-[10px] leading-4 text-white">
+            {badge}
+          </span>
+        )}
+      </div>
+      <div className="space-y-0.5 p-1.5">
+        <p className="truncate text-[11px] font-medium" title={title}>
+          {title}
+        </p>
+        <p className="truncate text-[10px] text-muted-foreground">{meta}</p>
+      </div>
+    </label>
+  );
+}
+
 // 站点设置：常规（站点名 / 开放注册 / 上传上限）+ 邮件（SMTP）配置
 export function AdminSettingsClient() {
   const router = useRouter();
@@ -105,8 +163,38 @@ export function AdminSettingsClient() {
   // R2 记录一致性校验/清理（孤儿记录：数据库有记录、桶里没文件）
   const [rc, setRc] = useState<{
     running: boolean;
-    result: { checked: number; present: number; missing: number; unconfigured: number; missingIds: string[] } | null;
+    result: {
+      checked: number;
+      present: number;
+      missing: number;
+      unconfigured: number;
+      missingIds: string[];
+      missingItems: { id: string; filename: string; size: number; storage: string; createdAt: string; ownerName: string | null }[];
+      unconfiguredItems: { id: string; filename: string; size: number; storage: string; createdAt: string; ownerName: string | null }[];
+    } | null;
   }>({ running: false, result: null });
+  // 桶内多余文件核对（桶里有、网站已无记录）：列出后由管理员决定保留还是删除
+  const [orphan, setOrphan] = useState<{
+    running: boolean;
+    result: {
+      slots: number;
+      objects: number;
+      total: number;
+      truncated: boolean;
+      items: { slot: string; label: string; key: string; size: number; lastModified: string }[];
+      errors: string[];
+    } | null;
+  }>({ running: false, result: null });
+  const [orphanPicked, setOrphanPicked] = useState<Set<string>>(new Set());
+  // 对账结果弹窗：核对完成后自动打开；左右两方择一查看图片
+  const [resultOpen, setResultOpen] = useState(false);
+  const [side, setSide] = useState<"missing" | "orphan">("missing");
+  // 左侧（网站有记录）勾选、分页与批量动作状态
+  const [missingPicked, setMissingPicked] = useState<Set<string>>(new Set());
+  const [missingPage, setMissingPage] = useState(1);
+  const [orphanPage, setOrphanPage] = useState(1);
+  const [moving, setMoving] = useState(false);
+  const [adopting, setAdopting] = useState(false);
   // 备份与还原
   const [restoring, setRestoring] = useState(false);
   const restoreInputRef = useRef<HTMLInputElement>(null);
@@ -313,7 +401,7 @@ export function AdminSettingsClient() {
   }
 
   // R2 记录一致性校验：数据库记录 vs 桶内真实对象
-  async function checkR2() {
+  async function checkR2(): Promise<{ missing: number } | null> {
     setRc({ running: true, result: null });
     try {
       const res = await fetch("/api/admin/storage/reconcile", {
@@ -324,12 +412,18 @@ export function AdminSettingsClient() {
       const json = await res.json();
       if (json.ok) {
         setRc({ running: false, result: json.data });
+        setMissingPicked(new Set());
+        setMissingPage(1);
         if (json.data.missing > 0) toast.warning(`发现 ${json.data.missing} 条孤儿记录（桶里没有对应文件）`);
         else toast.success("全部记录与桶内对象一致");
-      } else toast.error(json.error);
+        return json.data;
+      }
+      toast.error(json.error);
+      return null;
     } catch {
       toast.error("校验请求失败，请重试");
       setRc((s) => ({ ...s, running: false }));
+      return null;
     }
   }
 
@@ -356,6 +450,141 @@ export function AdminSettingsClient() {
     } catch {
       toast.error("清理请求失败，请重试");
       setRc((s) => ({ ...s, running: false }));
+    }
+  }
+
+  // 存储对账：一次跑完两个方向，完成后自动弹出结果；有数据的一方默认展示
+  async function checkStorage() {
+    const [a, b] = await Promise.all([checkR2(), checkOrphans()]);
+    setSide(a && a.missing > 0 ? "missing" : b && b.items.length > 0 ? "orphan" : "missing");
+    setResultOpen(true);
+  }
+
+  // 核对桶内多余文件：列出「桶里有、网站已无记录」的对象
+  async function checkOrphans(): Promise<{ items: unknown[] } | null> {
+    setOrphan({ running: true, result: null });
+    setOrphanPicked(new Set());
+    setOrphanPage(1);
+    try {
+      const res = await fetch("/api/admin/storage/orphans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check" }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setOrphan({ running: false, result: json.data });
+        if (json.data.total > 0) toast.warning(`发现 ${json.data.total} 个网站已无记录的文件`);
+        else toast.success("桶内没有多余文件");
+        return json.data;
+      }
+      toast.error(json.error);
+      setOrphan((s) => ({ ...s, running: false }));
+      return null;
+    } catch {
+      toast.error("核对请求失败，请重试");
+      setOrphan((s) => ({ ...s, running: false }));
+      return null;
+    }
+  }
+
+  // 删除选中的桶内多余文件（二次确认，服务端会再复核一次引用）
+  async function deleteOrphans() {
+    const items = (orphan.result?.items ?? []).filter((it) => orphanPicked.has(orphanKey(it.slot, it.key)));
+    if (!items.length) return;
+    if (!confirm(`确定从桶内删除选中的 ${items.length} 个文件？\n\n这些文件网站已无记录，删除后不可恢复。`)) return;
+    setOrphan((s) => ({ ...s, running: true }));
+    try {
+      const res = await fetch("/api/admin/storage/orphans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", items: items.map((it) => ({ slot: it.slot, key: it.key })) }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        const { deleted, skipped, failed } = json.data;
+        toast.success(`已从桶内删除 ${deleted} 个文件${skipped ? `，跳过 ${skipped} 个（网站仍在使用）` : ""}${failed ? `，失败 ${failed} 个` : ""}`);
+        await checkOrphans();
+      } else {
+        toast.error(json.error);
+        setOrphan((s) => ({ ...s, running: false }));
+      }
+    } catch {
+      toast.error("删除请求失败，请重试");
+      setOrphan((s) => ({ ...s, running: false }));
+    }
+  }
+
+  // 左侧选中项移入桶内：按记录当前存储位置成组迁移到已配置的桶
+  async function moveMissingToBucket() {
+    const list = [...(rc.result?.missingItems ?? []), ...(rc.result?.unconfiguredItems ?? [])];
+    const items = list.filter((it) => missingPicked.has(it.id));
+    if (!items.length) return;
+    if (!bucketTarget) {
+      toast.error("请先在「存储设置」配置并保存一个对象存储桶");
+      return;
+    }
+    const froms = new Set(items.map((it) => it.storage));
+    if (froms.size > 1) {
+      toast.error("所选图片分布在多个存储位置，请分批选择");
+      return;
+    }
+    const from = [...froms][0];
+    if (from === bucketTarget) {
+      toast.error("这些图片已在目标桶内");
+      return;
+    }
+    if (from.startsWith("r2:")) {
+      const idx = Number.parseInt(from.slice(3), 10);
+      const cfg = form?.r2Slots[idx];
+      if (!cfg || !cfg.accessKeyId || !cfg.secretAccessKey || !slotConfigured(cfg)) {
+        toast.error("这些原图所在的桶未配置，无法读取，请先补全该桶配置");
+        return;
+      }
+    }
+    if (!confirm(`把 ${items.length} 张图片从 ${from} 移入 ${bucketTarget}？\n\n会读取原图写入桶，成功后删除原位置文件。`)) return;
+    setMoving(true);
+    try {
+      const res = await fetch("/api/admin/storage/migrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from, to: bucketTarget, ids: items.map((it) => it.id) }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        toast.success("已开始移入桶内，可在「数据迁移」页查看进度");
+        setMissingPicked(new Set());
+      } else toast.error(json.error);
+    } catch {
+      toast.error("请求失败，请重试");
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  // 右侧选中项移入网站：下载到本地并收录为图片记录，成功后删除桶内副本
+  async function adoptOrphans() {
+    const items = (orphan.result?.items ?? []).filter((it) => orphanPicked.has(orphanKey(it.slot, it.key)));
+    if (!items.length) return;
+    if (!confirm(`把选中的 ${items.length} 个文件从桶内移入网站（下载到本地并收录为图片）？\n\n成功后删除桶内副本。`)) return;
+    setAdopting(true);
+    try {
+      const res = await fetch("/api/admin/storage/orphans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "adopt", items: items.map((it) => ({ slot: it.slot, key: it.key })) }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        const { adopted, failed } = json.data;
+        toast.success(`已移入网站 ${adopted} 个${failed ? `，失败 ${failed} 个` : ""}`);
+        setOrphanPicked(new Set());
+        await checkOrphans();
+      } else toast.error(json.error);
+    } catch {
+      toast.error("请求失败，请重试");
+    } finally {
+      setAdopting(false);
     }
   }
 
@@ -659,6 +888,22 @@ export function AdminSettingsClient() {
     );
   };
 
+  // ===== 对账结果展示：分页、选中与目标桶 =====
+  const PAGE_SIZE = 40;
+  // 「移入桶内」的目标：第一个配置完整的桶
+  const bucketTarget = (() => {
+    if (!form) return null;
+    const i = form.r2Slots.findIndex((c) => c.accessKeyId && c.secretAccessKey && slotConfigured(c));
+    return i >= 0 ? `r2:${i}` : null;
+  })();
+  const leftList = [...(rc.result?.missingItems ?? []), ...(rc.result?.unconfiguredItems ?? [])];
+  const missingIdSet = new Set((rc.result?.missingItems ?? []).map((it) => it.id));
+  const leftPages = Math.max(1, Math.ceil(leftList.length / PAGE_SIZE));
+  const leftPageItems = leftList.slice((missingPage - 1) * PAGE_SIZE, missingPage * PAGE_SIZE);
+  const orphanList = orphan.result?.items ?? [];
+  const orphanPages = Math.max(1, Math.ceil(orphanList.length / PAGE_SIZE));
+  const orphanPageItems = orphanList.slice((orphanPage - 1) * PAGE_SIZE, orphanPage * PAGE_SIZE);
+
   return (
     <div className="space-y-5">
       {/* 标题行：站点设置 + 操作日志按钮（点击弹出日志，不再单独占一个页签/版面） */}
@@ -921,29 +1166,267 @@ export function AdminSettingsClient() {
             </Button>
           </div>
 
-          {/* R2 记录一致性校验：数据库记录 vs 桶内真实对象（孤儿记录清理） */}
-          <div className="space-y-2 border-t pt-4">
-              <Label>记录一致性校验</Label>
-              <p className="text-xs text-muted-foreground">
-                逐个核对指向 R2 的记录与桶内真实对象。若曾在 Cloudflare 后台直接清空过桶，数据库会残留孤儿记录
-                （页面显示有文件、桶里实际没有），可在此校验并清理。清理前请确认上方桶配置与当初写入的桶一致。
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outline" onClick={checkR2} disabled={rc.running}>
-                  {rc.running ? <Loader2 className="size-4 animate-spin" /> : null} 校验记录与桶一致性
+          {/* 存储对账：双向核对网站记录与桶内对象 */}
+          <div className="space-y-3 border-t pt-4">
+            <Label>存储对账</Label>
+            <p className="text-xs text-muted-foreground">
+              双向核对网站记录与桶内文件：① 网站有记录但桶里没有文件，可清理残留记录；
+              ② 桶里有文件但网站已无记录（例如删除照片后残留），可自行决定保留或从桶内删除。
+              清理前请确认上方桶配置与当初写入的桶一致。
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" onClick={checkStorage} disabled={rc.running || orphan.running}>
+                {rc.running || orphan.running ? <Loader2 className="size-4 animate-spin" /> : null} 开始核对
+              </Button>
+              {(rc.result || orphan.result) && (
+                <Button variant="ghost" onClick={() => setResultOpen(true)}>
+                  查看核对结果
                 </Button>
-                {rc.result && (
-                  <span className="text-xs text-muted-foreground">
-                    共 {rc.result.checked} 条：存在 {rc.result.present}，缺失 {rc.result.missing}
-                    {rc.result.unconfigured > 0 ? `，无法校验（槽位未配置）${rc.result.unconfigured}` : ""}
-                  </span>
-                )}
-                {rc.result && rc.result.missing > 0 && (
-                  <Button variant="destructive" onClick={cleanR2} disabled={rc.running}>
-                    清理 {rc.result.missing} 条缺失记录
-                  </Button>
-                )}
-              </div>
+              )}
+              {rc.result && (
+                <span className="text-xs text-muted-foreground">网站缺文件 {rc.result.missing} 条</span>
+              )}
+              {orphan.result && (
+                <span className="text-xs text-muted-foreground">桶内多余 {orphan.result.total} 个</span>
+              )}
+            </div>
+
+            {/* 核对结果：大弹窗内以图片网格展示两侧差异 */}
+            <Dialog open={resultOpen} onOpenChange={setResultOpen}>
+              <DialogContent className="flex max-h-[88vh] w-[96vw] max-w-7xl flex-col gap-3">
+                <DialogHeader>
+                  <DialogTitle>存储对账结果</DialogTitle>
+                </DialogHeader>
+                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+                  {orphan.result && orphan.result.slots === 0 && (
+                    <p className="rounded-md border border-amber-300/60 bg-amber-50/60 p-2 text-xs text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+                      当前没有已配置完整（桶名 + 密钥 + 端点）的对象存储桶，无法读取桶内文件，因此这里不会有图片。
+                      请先在上方「存储设置」填写并保存桶配置，再重新核对；若历史记录指向已移除的桶，会显示为「无法校验」。
+                    </p>
+                  )}
+
+                  {/* 左右两方择一：点哪边就展示哪边的图片 */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSide("missing")}
+                      className={`rounded-lg p-3 text-left transition ${
+                        side === "missing" ? "border-2 border-primary bg-muted/40" : "border border-border hover:bg-muted/40"
+                      }`}
+                    >
+                      <span className="flex items-start justify-between gap-2">
+                        <span className="text-sm font-medium">网站有记录、桶里没文件</span>
+                        {side === "missing" && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                      </span>
+                      <p className="mt-1 text-2xl font-bold">
+                        {rc.result?.missing ?? 0}
+                        <span className="ml-1 text-xs font-normal text-muted-foreground">条</span>
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        共校验 {rc.result?.checked ?? 0} 条 · 无法校验 {rc.result?.unconfigured ?? 0} 条
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSide("orphan")}
+                      className={`rounded-lg p-3 text-left transition ${
+                        side === "orphan" ? "border-2 border-primary bg-muted/40" : "border border-border hover:bg-muted/40"
+                      }`}
+                    >
+                      <span className="flex items-start justify-between gap-2">
+                        <span className="text-sm font-medium">桶内有文件、网站没记录</span>
+                        {side === "orphan" && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                      </span>
+                      <p className="mt-1 text-2xl font-bold">
+                        {orphan.result?.total ?? 0}
+                        <span className="ml-1 text-xs font-normal text-muted-foreground">个</span>
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">桶内对象 {orphan.result?.objects ?? 0} 个</p>
+                    </button>
+                  </div>
+
+                  {/* 左侧内容：网站有记录、桶里没文件 */}
+                  {side === "missing" ? (
+                    <section className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs text-muted-foreground">
+                          勾选后可「移入桶内」；桶里确实缺失的记录也可直接清理。
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={rc.running || leftList.length === 0}
+                            onClick={() =>
+                              setMissingPicked(
+                                missingPicked.size >= leftList.length
+                                  ? new Set()
+                                  : new Set(leftList.map((it) => it.id))
+                              )
+                            }
+                          >
+                            {leftList.length > 0 && missingPicked.size >= leftList.length ? "取消全选" : "全选"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={moveMissingToBucket}
+                            disabled={moving || missingPicked.size === 0}
+                            title={bucketTarget ? `移入 ${bucketTarget}` : "请先配置对象存储桶"}
+                          >
+                            {moving ? <Loader2 className="size-4 animate-spin" /> : null} 移入桶内（{missingPicked.size}）
+                          </Button>
+                          {rc.result && rc.result.missing > 0 && (
+                            <Button size="sm" variant="destructive" onClick={cleanR2} disabled={rc.running}>
+                              清理 {rc.result.missing} 条缺失记录
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                      {rc.result && leftList.length === 0 && (
+                        <p className="text-xs text-muted-foreground">没有相关记录。</p>
+                      )}
+                      {leftPageItems.length > 0 && (
+                        <>
+                          <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-8 2xl:grid-cols-10">
+                            {leftPageItems.map((it) => (
+                              <ResultCard
+                                key={it.id}
+                                src={`/api/images/${it.id}/thumb`}
+                                title={it.filename}
+                                meta={`${it.ownerName ?? "未知"} · ${formatBytes(it.size)} · ${shortDate(it.createdAt)}`}
+                                badge={missingIdSet.has(it.id) ? "缺失" : "未校验"}
+                                checked={missingPicked.has(it.id)}
+                                onToggle={() =>
+                                  setMissingPicked((s) => {
+                                    const next = new Set(s);
+                                    if (next.has(it.id)) next.delete(it.id);
+                                    else next.add(it.id);
+                                    return next;
+                                  })
+                                }
+                              />
+                            ))}
+                          </div>
+                          <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+                            <Button size="sm" variant="outline" disabled={missingPage <= 1} onClick={() => setMissingPage((p) => p - 1)}>
+                              上一页
+                            </Button>
+                            <span>
+                              {missingPage} / {leftPages} · 共 {leftList.length} 项
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={missingPage >= leftPages}
+                              onClick={() => setMissingPage((p) => p + 1)}
+                            >
+                              下一页
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                      {rc.result && rc.result.unconfigured > 0 && (
+                        <p className="text-xs text-amber-600">
+                          其中 {rc.result.unconfigured} 条指向未配置的桶，原图无法读取；补全桶配置后重新核对即可。
+                        </p>
+                      )}
+                    </section>
+                  ) : (
+                    /* 右侧内容：桶里有文件、网站没记录 */
+                    <section className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs text-muted-foreground">
+                          勾选后可「移入网站」（下载到本地并收录为图片），也可直接从桶内删除。
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={orphan.running || orphanList.length === 0}
+                            onClick={() =>
+                              setOrphanPicked(
+                                orphanPicked.size >= orphanList.length
+                                  ? new Set()
+                                  : new Set(orphanList.map((it) => orphanKey(it.slot, it.key)))
+                              )
+                            }
+                          >
+                            {orphanList.length > 0 && orphanPicked.size >= orphanList.length ? "取消全选" : "全选"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={adoptOrphans}
+                            disabled={adopting || orphanPicked.size === 0}
+                          >
+                            {adopting ? <Loader2 className="size-4 animate-spin" /> : null} 移入网站（{orphanPicked.size}）
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={deleteOrphans}
+                            disabled={orphan.running || orphanPicked.size === 0}
+                          >
+                            删除选中（{orphanPicked.size}）
+                          </Button>
+                        </div>
+                      </div>
+                      {orphan.result && orphan.result.errors.length > 0 && (
+                        <p className="text-xs text-amber-600">部分存储读取失败：{orphan.result.errors.join("；")}</p>
+                      )}
+                      {orphan.result && orphan.result.truncated && (
+                        <p className="text-xs text-muted-foreground">
+                          仅列出最近 {orphan.result.items.length} 个，可分批处理后再核对。
+                        </p>
+                      )}
+                      {orphanPageItems.length > 0 ? (
+                        <>
+                          <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-8 2xl:grid-cols-10">
+                            {orphanPageItems.map((it) => {
+                              const id = orphanKey(it.slot, it.key);
+                              return (
+                                <ResultCard
+                                  key={id}
+                                  src={`/api/admin/storage/orphans/preview?slot=${encodeURIComponent(it.slot)}&key=${encodeURIComponent(it.key)}`}
+                                  title={it.key.split("/").pop() ?? it.key}
+                                  meta={`${it.label} · ${formatBytes(it.size)} · ${shortDate(it.lastModified)}`}
+                                  checked={orphanPicked.has(id)}
+                                  onToggle={() =>
+                                    setOrphanPicked((s) => {
+                                      const next = new Set(s);
+                                      if (next.has(id)) next.delete(id);
+                                      else next.add(id);
+                                      return next;
+                                    })
+                                  }
+                                />
+                              );
+                            })}
+                          </div>
+                          <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+                            <Button size="sm" variant="outline" disabled={orphanPage <= 1} onClick={() => setOrphanPage((p) => p - 1)}>
+                              上一页
+                            </Button>
+                            <span>
+                              {orphanPage} / {orphanPages} · 共 {orphanList.length} 项
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={orphanPage >= orphanPages}
+                              onClick={() => setOrphanPage((p) => p + 1)}
+                            >
+                              下一页
+                            </Button>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">桶内没有多余文件。</p>
+                      )}
+                    </section>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
 
           {/* R2 实时同步：独立子组件（自带 10s 轮询），状态更新只重渲染本面板，不拖累整页长表单 */}
