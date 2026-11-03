@@ -59,8 +59,8 @@ services:
       AUTH_TRUST_HOST: "true"
       DATABASE_URL: postgresql://imagehub:${POSTGRES_PASSWORD:-imagehub-pass-change-me}@postgres:5432/imagehub
       LOCAL_STORAGE_DIR: /app/storage
-      MAX_UPLOAD_MB: "512"
-      CONVERT_TO_WEBP: "false"
+      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-512}"
+      CONVERT_TO_WEBP: "${CONVERT_TO_WEBP:-false}"
       # 默认留空 = 不启用 Redis（限流走进程内存）；启用时在 .env 设 REDIS_URL=redis://redis:6379
       # 并用 docker compose --profile redis up -d 启动；也可在站点设置里随时改地址（无需重启）
       REDIS_URL: ${REDIS_URL:-}

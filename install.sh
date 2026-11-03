@@ -5,21 +5,26 @@
 # 用法（服务器上执行一条命令完成安装）：
 #   curl -fsSL https://raw.githubusercontent.com/YsSZ-INK/ImageHub/main/install.sh | bash
 #
-# 交互终端下会依次询问：
+# 交互终端下会依次询问（每一步直接回车即取默认值）：
 #   1) 安装目录          默认 ~/ImageHub
 #   2) 服务端口          默认 3000（自动校验 1-65535）
 #   3) 端口绑定地址      默认 127.0.0.1（仅本机，配合反向代理）
 #   4) 站点对外访问地址  默认 http://公网IP:端口
 #   5) 数据库密码        留空自动生成 64 位随机密码
-#   6) 是否启用 Redis    默认不启用（限流自动降级进程内存）
-#   启动成功后 7) 引导立即注册站长账号：第一个注册的账号自动成为超级管理员，
+#   6) 图片上传上限      默认 512 MB（1-512）
+#   7) 是否自动转 WebP   默认否
+#   8) 是否启用 Redis    默认不启用（限流自动降级进程内存）
+#   最后确认配置再开始安装
+#   启动成功后 9) 引导立即注册站长账号：第一个注册的账号自动成为超级管理员，
 #   请求会自动携带脚本生成的首注册门控令牌（SETUP_TOKEN），防止服务就绪到
 #   站长注册之间的窗口被公网陌生人抢注超管。
 #   会话密钥 AUTH_SECRET 与 SETUP_TOKEN 始终自动随机生成，不询问。
 #
-# 非交互场景（curl|bash / CI / 脚本化部署）全部取默认值，或用环境变量预设：
+# curl | bash 同样可以交互：脚本通过 /dev/tty 读取输入，不依赖标准输入；
+# 只有在完全没有终端（CI / 远程非交互）时才全部取默认值，可用环境变量预设：
 #   SITE_URL=https://img.example.com PORT=8080 IMAGEHUB_DIR=/opt/ImageHub \
-#   BIND_IP=0.0.0.0 POSTGRES_PASSWORD=YourPass123 REDIS_ENABLED=1 bash install.sh
+#   BIND_IP=0.0.0.0 POSTGRES_PASSWORD=YourPass123 \
+#   MAX_UPLOAD_MB=256 CONVERT_TO_WEBP=1 REDIS_ENABLED=1 bash install.sh
 # ============================================================
 set -euo pipefail
 
@@ -47,33 +52,92 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 ${SUDO} docker compose version >/dev/null 2>&1 || err "Docker Compose 插件不可用，请升级 Docker"
 
-# ---------- 问答工具 ----------
-# ask 变量名 提示语 默认值：环境变量已预设时跳过；非交互终端直接取默认值
-ask() {
-  if [ -n "${!1:-}" ]; then return; fi
-  if [ -t 0 ]; then
-    read -rp "$2 [$3]: " _v || _v=""
-    eval "$1=\"\${_v:-$3}\""
+# ---------- 交互输入通道 ----------
+# 直接执行脚本时 stdin 就是终端；curl | bash 时 stdin 是脚本管道（[ -t 0 ] 为假），
+# 但进程仍挂在终端上——此时单独打开 /dev/tty 作为输入源，保证仍能逐项询问，
+# 且不会把脚本文本当成用户输入吞掉。
+TTY_FD=""
+if [ -t 0 ]; then
+  TTY_FD=0
+elif : 2>/dev/null </dev/tty; then
+  # 先静音 stderr 再打开 /dev/tty：没有终端时不会往日志里吐报错
+  exec 3</dev/tty
+  TTY_FD=3
+fi
+INTERACTIVE=""
+[ -n "$TTY_FD" ] && INTERACTIVE=1
+
+_ANS=""
+# read_line 提示语 [secret]：读一行到 _ANS；无终端时返回非 0（调用方取默认值）
+read_line() {
+  local _prompt="$1" _mode="${2:-}" _v=""
+  [ -n "$INTERACTIVE" ] || return 1
+  if [ "$TTY_FD" = "0" ]; then
+    if [ "$_mode" = "secret" ]; then read -rsp "$_prompt" _v || _v=""; echo ""
+    else read -rp "$_prompt" _v || _v=""; fi
   else
-    eval "$1=\"$3\""
+    if [ "$_mode" = "secret" ]; then read -r -s -u "$TTY_FD" -p "$_prompt" _v || _v=""; echo ""
+    else read -r -u "$TTY_FD" -p "$_prompt" _v || _v=""; fi
   fi
+  _ANS="$_v"
+  return 0
+}
+
+# ---------- 问答工具 ----------
+# ask 变量名 提示语 默认值：环境变量已预设时跳过；直接回车取默认值
+ask() {
+  local _var="$1" _prompt="$2" _def="$3" _v=""
+  if [ -n "${!_var:-}" ]; then return; fi
+  if read_line "$_prompt [$_def]: "; then _v="$_ANS"; fi
+  printf -v "$_var" '%s' "${_v:-$_def}"
+}
+
+# ask_num 变量名 提示语 默认值 最小值 最大值：非数字或越界时重新询问
+ask_num() {
+  local _var="$1" _prompt="$2" _def="$3" _min="$4" _max="$5" _v=""
+  while true; do
+    ask "$_var" "$_prompt" "$_def"
+    _v="${!_var}"
+    case "$_v" in
+      ''|*[!0-9]*) ;;
+      *) if [ "$_v" -ge "$_min" ] && [ "$_v" -le "$_max" ]; then return 0; fi ;;
+    esac
+    if [ -n "$INTERACTIVE" ]; then
+      warn "请输入 ${_min}-${_max} 之间的数字"
+      printf -v "$_var" ''
+      continue
+    fi
+    err "请输入 ${_min}-${_max} 之间的数字（当前值：${_v}）"
+  done
+}
+
+# ask_yes 变量名 提示语：回答 y/yes/1/true 置 1，其余置空
+ask_yes() {
+  local _var="$1" _prompt="$2" _v=""
+  if [ -n "${!_var:-}" ]; then
+    case "${!_var}" in
+      [yY]|[yY][eE][sS]|1|true|TRUE) printf -v "$_var" '1' ;;
+      *) printf -v "$_var" '' ;;
+    esac
+    return
+  fi
+  if read_line "$_prompt [y/N]: "; then _v="$_ANS"; fi
+  case "${_v:-N}" in [yY]|[yY][eE][sS]|1|true|TRUE) printf -v "$_var" '1' ;; *) printf -v "$_var" '' ;; esac
 }
 
 gen_key() { openssl rand -hex 32 2>/dev/null || od -An -N16 -tx1 /dev/urandom | tr -d ' \n'; }
 
 # ---------- 1) 安装目录 ----------
 INSTALL_DIR="${IMAGEHUB_DIR:-}"
-ask INSTALL_DIR "1/7 安装目录" "$HOME/ImageHub"
+ask INSTALL_DIR "1/8 安装目录" "$HOME/ImageHub"
 case "$INSTALL_DIR" in "~"*) INSTALL_DIR="${INSTALL_DIR/#\~/$HOME}" ;; esac
 
 # ---------- 2) 服务端口 ----------
-ask PORT "2/7 服务端口" "$DEFAULT_PORT"
-case "$PORT" in ''|*[!0-9]*) err "端口必须是数字" ;; esac
-[ "$PORT" -ge 1 ] && [ "$PORT" -le 65535 ] || err "端口需在 1-65535 之间"
+ask_num PORT "2/8 服务端口" "$DEFAULT_PORT" 1 65535
 
 # ---------- 3) 端口绑定地址 ----------
 # 绑定地址决定暴露与否：Docker 发布端口不走系统防火墙（iptables DOCKER 链 / Docker Desktop 放行）
-ask BIND_IP "3/7 端口绑定地址（127.0.0.1=仅本机，0.0.0.0=对外网开放）" "127.0.0.1"
+ask BIND_IP "3/8 端口绑定地址（127.0.0.1=仅本机，0.0.0.0=对外网开放）" "127.0.0.1"
 case "$BIND_IP" in 127.0.0.1|0.0.0.0) ;; *) warn "非常规绑定地址：${BIND_IP}（一般填 127.0.0.1 或 0.0.0.0）" ;; esac
 
 # ---------- 4) 站点对外访问地址 ----------
@@ -81,26 +145,25 @@ if [ -z "${SITE_URL:-}" ]; then
   PUB_IP="$(curl -4 -fsS --max-time 3 https://ifconfig.me 2>/dev/null || true)"
   if [ -n "$PUB_IP" ]; then SITE_URL="http://${PUB_IP}:${PORT}"; else SITE_URL="http://127.0.0.1:${PORT}"; fi
 fi
-ask SITE_URL "4/7 站点对外访问地址" "$SITE_URL"
+ask SITE_URL "4/8 站点对外访问地址" "$SITE_URL"
 case "$SITE_URL" in http://*|https://*) ;; *) SITE_URL="http://${SITE_URL}" ;; esac
 
 # ---------- 5) 数据库密码 ----------
 if [ -z "${POSTGRES_PASSWORD:-}" ]; then
-  if [ -t 0 ]; then
-    read -rp "5/7 数据库密码（留空自动生成 64 位随机密码）: " _p || _p=""
-    POSTGRES_PASSWORD="${_p:-$(gen_key)}"
-  else
-    POSTGRES_PASSWORD="$(gen_key)"
-  fi
+  _p=""
+  read_line "5/8 数据库密码（留空自动生成 64 位随机密码）: " secret && _p="$_ANS"
+  POSTGRES_PASSWORD="${_p:-$(gen_key)}"
 fi
 [ "${#POSTGRES_PASSWORD}" -ge 8 ] || err "数据库密码至少 8 位"
 
-# ---------- 6) Redis ----------
-if [ -z "${REDIS_ENABLED:-}" ] && [ -t 0 ]; then
-  read -rp "6/7 是否启用 Redis 缓存？（多实例部署或需要限流计数重启不丢失时建议启用）[y/N]: " _r || _r=""
-  case "${_r:-N}" in [yY]|[yY][eE][sS]) REDIS_ENABLED=1 ;; *) REDIS_ENABLED="" ;; esac
-fi
-REDIS_ENABLED="${REDIS_ENABLED:-}"
+# ---------- 6) 图片上传上限 ----------
+ask_num MAX_UPLOAD_MB "6/8 图片单文件上传上限（MB）" "512" 1 512
+
+# ---------- 7) 是否自动转 WebP ----------
+ask_yes CONVERT_TO_WEBP "7/8 把 jpg/png 自动转成 WebP 存储（省空间，画质轻微变化）？"
+
+# ---------- 8) Redis ----------
+ask_yes REDIS_ENABLED "8/8 启用 Redis 缓存（多实例部署或需限流计数重启不丢失时建议启用）？"
 
 # ---------- 生成会话密钥与首注册门控令牌（不询问，保证强度） ----------
 AUTH_SECRET="$(gen_key)"
@@ -114,10 +177,19 @@ log "安装目录　　：${INSTALL_DIR}"
 log "端口绑定　　：${BIND_IP}:${PORT}（容器内 3000）"
 log "站点地址　　：${SITE_URL}"
 log "数据库密码　：${POSTGRES_PASSWORD:0:4}********（已隐藏）"
+log "上传上限　　：${MAX_UPLOAD_MB} MB（视频不设上限）"
+log "WebP 转换　：$([ -n "$CONVERT_TO_WEBP" ] && echo '开启' || echo '关闭（保留原格式）')"
 log "会话密钥　　：随机生成"
 log "首注册门控　：已启用（启动后引导注册站长账号，第一个注册即超管）"
 log "Redis 缓存　：$([ -n "$REDIS_ENABLED" ] && echo '启用' || echo '不启用（限流走进程内存）')"
 log "──────────────────────────────"
+
+# 最后确认：非交互场景直接继续，交互场景允许退回修改前的状态
+if read_line "确认以上配置并开始安装？[Y/n]: "; then
+  case "${_ANS:-Y}" in
+    [nN]|[nN][oO]) log "已取消安装，未做任何改动"; exit 0 ;;
+  esac
+fi
 
 # ---------- 写入 .env ----------
 mkdir -p "$INSTALL_DIR"
@@ -145,7 +217,13 @@ else
     echo "BIND_IP=\"${BIND_IP}\""
     echo "POSTGRES_PASSWORD=\"${POSTGRES_PASSWORD}\""
     echo "SETUP_TOKEN=\"${SETUP_TOKEN}\""
-    [ -n "$REDIS_ENABLED" ] && echo "REDIS_URL=\"redis://redis:6379\""
+    echo "MAX_UPLOAD_MB=\"${MAX_UPLOAD_MB}\""
+    if [ -n "$CONVERT_TO_WEBP" ]; then
+      echo "CONVERT_TO_WEBP=\"true\""
+    else
+      echo "CONVERT_TO_WEBP=\"false\""
+    fi
+    if [ -n "$REDIS_ENABLED" ]; then echo "REDIS_URL=\"redis://redis:6379\""; fi
   } > .env
   log ".env 已生成（AUTH_SECRET/SETUP_TOKEN 随机；数据库密码为自定义或随机值）"
 fi
@@ -193,18 +271,20 @@ print_manual_hint() {
 
 register_owner() {
   log ""
-  log "──────── 7/7 注册站长账号 ────────"
+  log "──────── 9/9 注册站长账号 ────────"
   log "第一个注册的账号将自动成为超级管理员（站长），建议现在完成注册。"
-  read -rp "现在注册站长账号？[Y/n]: " _go || _go=""
+  _go=""
+  read_line "现在注册站长账号？[Y/n]: " && _go="$_ANS"
   case "${_go:-Y}" in
     [nN]|[nN][oO]) warn "已跳过：稍后可按下方指引手动注册（首注册门控保持生效）"; print_manual_hint; return 0 ;;
   esac
   local _email _name _pw _pw2 _attempt
   for _attempt in 1 2 3; do
-    read -rp "邮箱: " _email || _email=""
-    read -rp "用户名: " _name || _name=""
-    read -rsp "密码（至少 8 位，含大小写字母与数字）: " _pw || _pw=""; echo ""
-    read -rsp "再次输入密码: " _pw2 || _pw2=""; echo ""
+    _email=""; _name=""; _pw=""; _pw2=""
+    read_line "邮箱: " && _email="$_ANS"
+    read_line "用户名: " && _name="$_ANS"
+    read_line "密码（至少 8 位，含大小写字母与数字）: " secret && _pw="$_ANS"
+    read_line "再次输入密码: " secret && _pw2="$_ANS"
     if [ -z "$_email" ] || [ -z "$_name" ] || [ -z "$_pw" ]; then
       warn "邮箱/用户名/密码均不能为空，请重试（第 ${_attempt}/3 次）"; continue
     fi
@@ -236,7 +316,7 @@ register_owner() {
   return 0
 }
 
-if [ -t 0 ]; then
+if [ -n "$INTERACTIVE" ]; then
   register_owner
 else
   warn "非交互安装：首注册门控（SETUP_TOKEN）已生效，空库首次注册需携带该令牌，防止公网抢注超管"
