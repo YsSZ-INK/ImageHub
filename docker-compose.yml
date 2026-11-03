@@ -57,6 +57,9 @@ services:
       # 强制在 .env 中生成真实密钥
       AUTH_SECRET: ${AUTH_SECRET:?请在 .env 中设置 AUTH_SECRET（执行 openssl rand -base64 32 生成）}
       AUTH_TRUST_HOST: "true"
+      # 反向代理部署建议显式指定对外地址（如 https://img.example.com）：
+      # 反代没传 X-Forwarded-Proto 时，Auth.js 会按 http 生成回调，https 页面下的登录请求会被浏览器拦截
+      AUTH_URL: ${AUTH_URL:-}
       DATABASE_URL: postgresql://imagehub:${POSTGRES_PASSWORD:-imagehub-pass-change-me}@postgres:5432/imagehub
       LOCAL_STORAGE_DIR: /app/storage
       MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-512}"

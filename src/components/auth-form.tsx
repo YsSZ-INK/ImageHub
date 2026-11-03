@@ -50,9 +50,23 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
         else if (res.code === "CALLBACK_ERROR") toast.error("登录失败");
         else toast.error("邮箱或密码错误");
       } else {
+        // signIn 成功 ≠ 会话一定落盘：反向代理吞掉 Set-Cookie、浏览器禁用 Cookie、
+        // 访问域名与 AUTH_URL 不一致时，跳转会被中间件弹回登录页，用户只看到「点了没反应」。
+        // 先确认会话真的生效，再跳转；没生效就给出明确原因。
+        const session: { user?: unknown } | null | undefined = await fetch("/api/auth/session", { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => undefined);
+        if (session && !session.user) {
+          toast.error("登录已通过，但会话没有保存：请检查浏览器是否禁用了 Cookie，或反向代理是否拦截了 Set-Cookie");
+          return;
+        }
         // 直接进入目标页；不再额外 refresh（那会对当前登录页再发一次 RSC 请求，纯属浪费）
         router.push(callbackUrl);
       }
+    } catch {
+      // 网络中断 / 反向代理 502 / 移动端切换网络时 fetch 抛错：
+      // 必须给出可见反馈，否则用户只会看到按钮转一下就复原，像是「点了没反应」
+      toast.error("网络异常，登录请求未完成，请检查网络后重试");
     } finally {
       setLoading(false);
     }
@@ -82,6 +96,9 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
       if (!login?.error) {
         router.push(callbackUrl);
       }
+    } catch {
+      // 注册接口或随后的自动登录请求抛错时同样要有可见反馈
+      toast.error("网络异常，注册请求未完成，请检查网络后重试");
     } finally {
       setLoading(false);
     }
