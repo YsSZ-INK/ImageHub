@@ -7,6 +7,14 @@ import { VisibilityBadge, ImageActions, RestoreButton } from "@/components/image
 import { preloadRaw } from "@/lib/utils";
 import type { ImageDTO } from "@/server/image.service";
 
+// 网格只负责缩略图。原图预取仅在「鼠标悬停」且设备支持 hover 时进行：
+// 触屏设备滚动时 touchstart 会命中大量卡片，过去会顺带下载整张原图，
+// 弱网或大图时把带宽/主线程占满，页面看起来就「卡死」了。
+function hoverPreload(url: string) {
+  if (typeof window === "undefined" || !window.matchMedia("(hover: hover)").matches) return;
+  preloadRaw(url);
+}
+
 // 图片网格：waterfall（CSS columns 瀑布流）或 grid（等比方格）
 export function ImageGrid({
   items,
@@ -63,8 +71,7 @@ export function ImageGrid({
           alt={img.filename}
           loading="lazy"
           decoding="async"
-          onMouseEnter={() => preloadRaw(img.rawUrl)}
-          onTouchStart={() => preloadRaw(img.rawUrl)}
+          onMouseEnter={() => hoverPreload(img.rawUrl)}
           onClick={() => setLightbox(items.indexOf(img))}
           onError={() => setFailed((s) => new Set(s).add(img.id))}
           className={`w-full cursor-zoom-in bg-muted object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03] ${layout === "grid" ? "aspect-square" : ""}`}

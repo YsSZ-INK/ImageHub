@@ -49,8 +49,10 @@ export function Lightbox({
     setHdRetry(0);
   }, [img?.rawUrl]);
 
-  // 相邻原图预取：显示当前图的同时后台加载前后各一张，翻页即显高清
+  // 相邻原图预取：显示当前图的同时后台加载前后各一张，翻页即显高清。
+  // 仅在鼠标悬停设备上做——触屏设备打开灯箱就顺带下两张原图，弱网下反而拖慢当前图。
   useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia("(hover: hover)").matches) return;
     [images[index + 1], images[index - 1]].forEach((n) => {
       if (n && !n.mimeType.startsWith("video/")) preloadRaw(n.rawUrl);
     });

@@ -117,6 +117,8 @@ export function useCursorPager(
 
   // 无服务端首屏数据时，挂载后加载第一页
   const mounted = useRef(false);
+  // 记录已按哪个查询加载过：避免挂载时与下面的「查询变化」effect 各发一次重复请求
+  const lastKey = useRef(key);
   useEffect(() => {
     if (!opts?.initialItems) loadPage(1);
     mounted.current = true;
@@ -126,6 +128,8 @@ export function useCursorPager(
   // 查询参数变化（如筛选条件切换）→ 回到第一页重新加载
   useEffect(() => {
     if (!mounted.current) return; // 首次挂载由上面的 effect 负责，避免重复请求
+    if (lastKey.current === key) return;
+    lastKey.current = key;
     loadPage(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
