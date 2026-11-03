@@ -50,7 +50,7 @@ curl http://localhost:3000/api/health   # {"ok":true,"db":"up"}
 | `DATABASE_URL` | 本地开发为 `file:./dev.db`；Docker 由 compose 注入 |
 | `SETUP_TOKEN` | 可选首注册门控：空库首次注册必须携带，防公网抢注超管 |
 | `BIND_IP` / `PORT` | 监听地址与端口，默认 `127.0.0.1:3000` |
-| `MAX_UPLOAD_MB` | 单文件上限天花板，实际生效取与界面设置的较小值 |
+| `MAX_UPLOAD_MB` | 图片单文件上限天花板，实际生效取与界面设置的较小值（视频不设大小上限） |
 | `REDIS_URL` | 可选，限流计数落 Redis（站点设置里的地址优先） |
 | `TRUST_PROXY` | 反代后设为 `1`，按真实客户端 IP 限流 |
 

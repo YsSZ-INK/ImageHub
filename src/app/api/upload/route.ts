@@ -3,6 +3,7 @@ import { handle, assertSameOrigin, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
 import { getSettings, envMaxUploadMB } from "@/lib/settings";
 import { uploadImages, assertAlbumAccess, normalizeUploadVisibility } from "@/server/image.service";
+import { detectVideoMime } from "@/lib/image";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -22,6 +23,7 @@ export const POST = handle(async (req: Request) => {
   // Content-Length 预检：formData() 会把整个请求体先读入内存再逐文件校验，
   // 超大请求体可能撑爆内存；上限取 20 文件 × 单文件上限 + 1MB 表单开销。
   // 头缺失（chunked 传输）时无法判定，放行交由后续逐文件校验兜底。
+  // 视频不受单文件上限约束，大视频由前端走分片上传（见 upload-dropzone）。
   const clRaw = req.headers.get("content-length");
   if (clRaw) {
     const cl = Number(clRaw);
@@ -44,9 +46,12 @@ export const POST = handle(async (req: Request) => {
 
   const payloads: { buf: Buffer; name: string; contentType: string }[] = [];
   for (const f of files) {
-    if (f.size > maxBytes) throw new AppError(`文件 ${f.name} 超过大小上限 ${maxMB}MB`, 413);
     // 不依赖浏览器声明的 MIME（拖拽文件可能为空或非标准值），统一交给魔数校验
     const buf = Buffer.from(await f.arrayBuffer());
+    // 大小上限只约束图片；视频不设单文件上限（仅受用户存储配额约束）
+    if (!detectVideoMime(buf) && f.size > maxBytes) {
+      throw new AppError(`图片 ${f.name} 超过大小上限 ${maxMB}MB`, 413);
+    }
     payloads.push({ buf, name: f.name || "image", contentType: f.type });
   }
 

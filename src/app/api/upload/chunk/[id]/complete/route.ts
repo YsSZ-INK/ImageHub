@@ -3,6 +3,7 @@ import { handle, assertSameOrigin, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
 import { completeChunkUpload } from "@/server/chunk-upload.service";
 import { normalizeUploadVisibility } from "@/server/image.service";
+import { getSettings, envMaxUploadMB } from "@/lib/settings";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -22,6 +23,9 @@ export const POST = handle(async (req: Request, { params }: { params: Promise<{ 
   } catch {
     visibility = undefined;
   }
-  const dto = await completeChunkUpload(user, id, normalizeUploadVisibility(visibility));
+  // 单文件上限只约束图片；视频不设大小上限（仍受用户存储配额约束）
+  const settings = await getSettings();
+  const maxMB = Math.min(settings.maxUploadMB, envMaxUploadMB() || settings.maxUploadMB);
+  const dto = await completeChunkUpload(user, id, normalizeUploadVisibility(visibility), maxMB * 1024 * 1024);
   return NextResponse.json({ ok: true, data: dto }, { status: 201 });
 });

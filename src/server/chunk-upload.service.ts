@@ -17,7 +17,8 @@ import type { User } from "@prisma/client";
 
 // 与前端切片大小保持一致
 export const CHUNK_SIZE = 5 * 1024 * 1024;
-const MAX_CHUNKS = 2000;
+// 分片数上限仅防异常请求；视频不设单文件大小上限，实际受用户存储配额约束
+const MAX_CHUNKS = 100_000;
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 // 图片走分片时全量读的上限（sharp 流水线需要 Buffer；正常图片远小于此）
 const IMAGE_BUF_LIMIT = 64 * 1024 * 1024;
@@ -65,14 +66,15 @@ async function cleanupSession(id: string) {
   await prisma.uploadSession.delete({ where: { id } }).catch(() => {});
 }
 
-// 创建会话：校验大小上限与分片数自洽，建分片目录
+// 创建会话：校验分片数自洽，建分片目录
+// 不在 init 阶段卡单文件大小：此时 MIME 由客户端声明不可信，统一在 complete 按魔数判定后
+// 仅对图片执行站点上限（视频不限大小）
 export async function initChunkUpload(
   user: User,
-  input: { filename: string; size: number; mimeType: string; totalChunks: number; albumId?: string | null },
-  maxBytes: number
+  input: { filename: string; size: number; mimeType: string; totalChunks: number; albumId?: string | null }
 ) {
-  if (!(input.size > 0) || input.size > maxBytes) {
-    throw new AppError(`文件大小超出上限 ${Math.round(maxBytes / 1024 / 1024)}MB`, 413);
+  if (!(input.size > 0)) {
+    throw new AppError("文件大小不合法", 400);
   }
   if (!Number.isInteger(input.totalChunks) || input.totalChunks < 1 || input.totalChunks > MAX_CHUNKS) {
     throw new AppError("分片数不合法", 400);
@@ -83,7 +85,7 @@ export async function initChunkUpload(
   // 先清过期会话再预检，避免被僵尸会话误判为「并行过多」
   await cleanupExpiredSessions();
   // 创建会话时预检配额与并行会话数：若拖到 complete 才查配额，可并行创建大量会话、
-  // 囤积磁盘分片（单会话上限 maxBytes）后永不 complete，白占磁盘与内存元数据。
+  // 囤积磁盘分片后永不 complete，白占磁盘与内存元数据。
   const [used, openSessions] = await Promise.all([
     localUsageOf(user.id),
     prisma.uploadSession.count({ where: { userId: user.id } }),
@@ -127,7 +129,12 @@ export async function listReceivedChunks(user: User, id: string) {
 }
 
 // 合并入库：流式拼 sha256 + 写合并临时文件（内存恒为单片）
-export async function completeChunkUpload(user: User, id: string, visibility: UploadVisibility = "PRIVATE"): Promise<ImageDTO> {
+export async function completeChunkUpload(
+  user: User,
+  id: string,
+  visibility: UploadVisibility = "PRIVATE",
+  imageMaxBytes = Number.POSITIVE_INFINITY
+): Promise<ImageDTO> {
   const s = await ownSession(id, user);
   const have = new Set(await listPartIndices(chunkDir(id)));
   const missing: number[] = [];
@@ -203,6 +210,11 @@ export async function completeChunkUpload(user: User, id: string, visibility: Up
   if (detectVideoMime(head)) {
     processed = await processAndStoreVideoFile(mergedPath, total, sha256, user.id, s.filename);
   } else if (detectImageMime(head)) {
+    // 图片受站点单文件上限约束（视频不限大小，只受存储配额约束）
+    if (total > imageMaxBytes) {
+      await cleanupSession(id);
+      throw new AppError(`图片超过大小上限 ${Math.round(imageMaxBytes / 1024 / 1024)}MB`, 413);
+    }
     if (total > IMAGE_BUF_LIMIT) {
       await cleanupSession(id);
       throw new AppError("图片过大（超过 64MB），请压缩后再上传", 413);

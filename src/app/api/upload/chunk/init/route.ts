@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { handle, assertSameOrigin, AppError } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
-import { getSettings, envMaxUploadMB } from "@/lib/settings";
 import { initChunkUpload } from "@/server/chunk-upload.service";
 import { assertAlbumAccess } from "@/server/image.service";
 import { rateLimit } from "@/lib/rate-limit";
@@ -17,7 +16,7 @@ const schema = z.object({
   albumId: z.string().max(64).optional().nullable(),
 });
 
-// 分片上传第一步：创建会话，返回 uploadId（大小上限与普通上传一致）
+// 分片上传第一步：创建会话，返回 uploadId（图片大小上限在 complete 阶段校验；视频不限大小）
 export const POST = handle(async (req: Request) => {
   assertSameOrigin(req);
   const user = await requireApiUser();
@@ -27,12 +26,12 @@ export const POST = handle(async (req: Request) => {
   const body = schema.parse(await req.json());
   await assertAlbumAccess(user, body.albumId ?? null);
 
-  const settings = await getSettings();
-  const maxMB = Math.min(settings.maxUploadMB, envMaxUploadMB() || settings.maxUploadMB);
-  const data = await initChunkUpload(
-    user,
-    { filename: body.filename, size: body.size, mimeType: body.mimeType, totalChunks: body.totalChunks, albumId: body.albumId ?? null },
-    maxMB * 1024 * 1024
-  );
+  const data = await initChunkUpload(user, {
+    filename: body.filename,
+    size: body.size,
+    mimeType: body.mimeType,
+    totalChunks: body.totalChunks,
+    albumId: body.albumId ?? null,
+  });
   return NextResponse.json({ ok: true, data }, { status: 201 });
 });

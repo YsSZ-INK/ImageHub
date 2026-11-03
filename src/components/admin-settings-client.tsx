@@ -149,7 +149,7 @@ function ResultCard({
   );
 }
 
-// 站点设置：常规（站点名 / 开放注册 / 上传上限）+ 邮件（SMTP）配置
+// 站点设置：常规（站点名 / 开放注册 / 图片上传上限）+ 邮件（SMTP）配置
 export function AdminSettingsClient() {
   const router = useRouter();
   const [form, setForm] = useState<SiteSettings | null>(null);
@@ -216,7 +216,7 @@ export function AdminSettingsClient() {
     if (!form) return;
     const maxMb = Number(maxMbInput);
     if (!maxMbInput || !Number.isInteger(maxMb) || maxMb < 1 || maxMb > 512) {
-      toast.error("上传上限需为 1-512 的整数（MB）");
+      toast.error("图片上传上限需为 1-512 的整数（MB）");
       return;
     }
     const port = portInput === "" ? 0 : Number(portInput);
@@ -942,7 +942,7 @@ export function AdminSettingsClient() {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="max-mb">单文件上传上限（MB）</Label>
+            <Label htmlFor="max-mb">图片上传上限（MB）</Label>
             <Input
               id="max-mb"
               type="number"
@@ -951,6 +951,7 @@ export function AdminSettingsClient() {
               value={maxMbInput}
               onChange={(e) => setMaxMbInput(e.target.value)}
             />
+            <p className="text-xs text-muted-foreground">仅限制图片；视频不设单文件上限（仍受用户存储配额约束）</p>
           </div>
           <Button onClick={save} disabled={saving}>
             {saving ? <Loader2 className="animate-spin" /> : null} 保存设置
