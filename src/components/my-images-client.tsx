@@ -38,14 +38,21 @@ function ShareField({ label, value }: { label: string; value: string }) {
   );
 }
 
-// 我的图片：多选 + 批量操作（删除/移动相册/改可见性）+ 按存储位置筛选
-export function MyImagesClient({ albums, storages }: { albums: { id: string; name: string }[]; storages: { marker: string; label: string }[] }) {
+// 我的图片：多选 + 批量操作（删除/移动相册/改可见性）+ 按存储位置 / 画廊进出 / 相册归属筛选
+export function MyImagesClient({ albums, storages }: { albums: { id: string; name: string; ownerName?: string }[]; storages: { marker: string; label: string }[] }) {
+  // 相册选项文案：管理员视角列表含所有用户的相册（默认名都叫「我的相册」），标注归属者便于区分
+  const albumLabel = (a: { name: string; ownerName?: string }) => (a.ownerName ? `${a.name}（${a.ownerName}）` : a.name);
   // 存储位置筛选：空 = 全部；切换后 useCursorPager 自动回第一页重新加载
   const [storage, setStorage] = useState("");
+  // 画廊筛选：in 已入画廊（公开且已过审）/ out 未入；相册筛选：none 未归类，其余为相册 id，空 = 全部
+  const [gallery, setGallery] = useState("");
+  const [album, setAlbum] = useState("");
   // 游标分页：翻页/跳页逻辑统一在 hook 内
   const { items, page, hasNext, loading, loadPage, gotoPage, totalPages, total } = useCursorPager({
     scope: "mine",
     ...(storage ? { storage } : {}),
+    ...(gallery ? { gallery } : {}),
+    ...(album ? { albumId: album } : {}),
   });
   // 徽标文案：自定义槽位名优先（与筛选按钮一致），回退默认「R2 一/二/…」
   const labelOf = (m: string) => storages.find((s) => s.marker === m)?.label ?? markerLabel(m);
@@ -95,11 +102,13 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
     await runBatch("delete");
   }
 
-  // 跨页全选：拉取当前筛选下全部图片 id（含未加载页）
+  // 跨页全选：拉取当前筛选（存储位置 / 画廊 / 相册）下全部图片 id（含未加载页）
   async function selectAll() {
     try {
       const sp = new URLSearchParams();
       if (storage) sp.set("storage", storage);
+      if (gallery) sp.set("gallery", gallery);
+      if (album) sp.set("albumId", album);
       const res = await fetch(`/api/images/ids${sp.size ? `?${sp}` : ""}`);
       const json = await res.json();
       if (json.ok) {
@@ -112,7 +121,7 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
   }
 
   // 进入/移出公共画廊：改为选中后点按钮批量操作（进入 = 设为公开，审核通过后进画廊）
-  async function setGallery(toPublic: boolean) {
+  async function batchGallery(toPublic: boolean) {
     if (selected.size === 0) return;
     await runBatch("visibility", { visibility: toPublic ? "PUBLIC" : "PRIVATE" });
   }
@@ -122,7 +131,7 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
 
   return (
     <div className="flex min-h-[calc(100vh-6rem)] flex-col space-y-4">
-      {/* 存储位置筛选：全部 / 本地磁盘 / 各个存储桶（自定义名） */}
+      {/* 筛选行：存储位置 / 画廊进出 / 相册归属，可任意组合（切换后自动回第一页） */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm text-muted-foreground">位置：</span>
         <Button size="sm" variant={storage === "" ? "secondary" : "outline"} className="h-8" onClick={() => setStorage("")}>
@@ -139,6 +148,26 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
             {s.label}
           </Button>
         ))}
+        <span className="ml-2 text-sm text-muted-foreground">画廊：</span>
+        <Button size="sm" variant={gallery === "" ? "secondary" : "outline"} className="h-8" onClick={() => setGallery("")} title="不按画廊状态筛选">
+          全部
+        </Button>
+        <Button size="sm" variant={gallery === "in" ? "secondary" : "outline"} className="h-8" onClick={() => setGallery("in")} title="公开且已通过审核的图片">
+          已入画廊
+        </Button>
+        <Button size="sm" variant={gallery === "out" ? "secondary" : "outline"} className="h-8" onClick={() => setGallery("out")} title="未进入公共画廊的图片（含审核中 / 私有 / 友链）">
+          未入画廊
+        </Button>
+        <span className="ml-2 text-sm text-muted-foreground">相册：</span>
+        <Select value={album} onChange={(e) => setAlbum(e.target.value)} className="h-8 w-44 text-sm">
+          <option value="">全部相册</option>
+          {albums.map((a) => (
+            <option key={a.id} value={a.id}>
+              {albumLabel(a)}
+            </option>
+          ))}
+          <option value="none">未归类</option>
+        </Select>
       </div>
       {items.length === 0 && !loading ? (
         <>
@@ -190,7 +219,7 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                   variant="outline"
                   className="text-sm"
                   disabled={batching || selected.size === 0}
-                  onClick={() => setGallery(true)}
+                  onClick={() => batchGallery(true)}
                   title="把选中图片设为公开（审核通过后进入公共画廊）"
                 >
                   <Images className="h-4 w-4" /> 进入画廊
@@ -200,7 +229,7 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                   variant="outline"
                   className="text-sm"
                   disabled={batching || selected.size === 0}
-                  onClick={() => setGallery(false)}
+                  onClick={() => batchGallery(false)}
                   title="把选中图片设为私有，从公共画廊移出"
                 >
                   <ImageOff className="h-4 w-4" /> 移出画廊
@@ -417,7 +446,7 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
               <option value="">选择相册…</option>
               {albums.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {a.name}
+                  {albumLabel(a)}
                 </option>
               ))}
               <option value="none">移出相册（清空归属）</option>

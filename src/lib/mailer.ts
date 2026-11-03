@@ -27,6 +27,20 @@ class ConsoleMailer implements Mailer {
   }
 }
 
+// SMTP 传输器（发送与连接探测共用）：地址不可达时 nodemailer 默认会挂很久，
+// 限定连接/握手/读写超时，失败快速返回给前端提示
+function smtpTransport(host: string, port: number, secure: boolean, user: string, pass: string) {
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: user ? { user, pass } : undefined,
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
+  });
+}
+
 class SmtpMailer implements Mailer {
   constructor(
     private host: string,
@@ -38,18 +52,28 @@ class SmtpMailer implements Mailer {
   ) {}
 
   async send(to: string, subject: string, text: string) {
-    const transport = nodemailer.createTransport({
-      host: this.host,
-      port: this.port,
-      secure: this.secure,
-      auth: this.user ? { user: this.user, pass: this.pass } : undefined,
-      // SMTP 地址不可达时默认会挂很久，导致「发送测试邮件」按钮长时间转圈；
-      // 限定连接/握手/读写超时，失败快速返回给前端提示
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 20_000,
-    });
+    const transport = smtpTransport(this.host, this.port, this.secure, this.user, this.pass);
     await transport.sendMail({ from: this.from || this.user, to, subject, text });
+  }
+}
+
+/**
+ * SMTP 连接探测（真实连接 + 认证握手，不发信）：
+ * 「邮件配置」状态徽标与「检测连接」按钮用。SMTP 无常驻连接，
+ * 状态为即时探测结果——配置后密码被改、服务商封禁等导致的失效可随时检出。
+ */
+export async function verifySmtp(s: {
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  smtpUser: string;
+  smtpPass: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await smtpTransport(s.smtpHost, s.smtpPort || 587, s.smtpSecure, s.smtpUser, s.smtpPass).verify();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "未知错误" };
   }
 }
 

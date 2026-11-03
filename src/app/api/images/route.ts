@@ -30,6 +30,10 @@ export const GET = handle(async (req: Request) => {
     cursor: url.searchParams.get("cursor") ?? undefined,
     take: Number(url.searchParams.get("take") ?? 24),
     storage: url.searchParams.get("storage") ?? undefined,
+    // 我的图片筛选：gallery=in 已入画廊 / out 未入（相册归属复用上面的 albumId，none=未归类）
+    gallery: ["in", "out"].includes(url.searchParams.get("gallery") ?? "")
+      ? (url.searchParams.get("gallery") as "in" | "out")
+      : undefined,
     // 日常记录筛选：上传者用户名 + 上传时间范围（可组合、可单独使用）
     owner: url.searchParams.get("owner") ?? undefined,
     from: parseDate(url.searchParams.get("from")),

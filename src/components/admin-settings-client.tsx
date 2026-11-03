@@ -258,6 +258,8 @@ export function AdminSettingsClient() {
         toast.success("设置已保存");
         // ajax 局部刷新：RSC 重取同步侧栏（存储驱动 / R2 桶卡片 / 站点名等），不整页 reload
         router.refresh();
+        // 邮件状态随保存重新探测（新配置立即生效可见，无需手动点检测）
+        refreshMail();
       } else toast.error(json.error);
     } finally {
       setSaving(false);
@@ -282,6 +284,24 @@ export function AdminSettingsClient() {
       setTesting(false);
     }
   }
+
+  // 邮件连接状态：服务端真实连接 + 认证握手探测（不发信）。
+  // SMTP 无常驻连接，这是即时探测——打开页面、保存配置、手动点「检测连接」时刷新，
+  // 用于发现首次配置成功后因密码被改、服务商封禁等问题导致的失效
+  const [mail, setMail] = useState<{ status: string; host: string; error?: string } | null>(null);
+  const [mailChecking, setMailChecking] = useState(false);
+  async function refreshMail() {
+    setMailChecking(true);
+    try {
+      const json = await fetch("/api/admin/settings/mail-status").then((r) => r.json());
+      if (json.ok) setMail(json.data);
+    } finally {
+      setMailChecking(false);
+    }
+  }
+  useEffect(() => {
+    refreshMail();
+  }, []);
 
   // Redis 连接状态与测试（状态为服务端当前生效连接，保存配置后点测试刷新）
   const [redis, setRedis] = useState<{ status: string; url: string; error: string; since: string; enabled: boolean } | null>(null);
@@ -966,6 +986,34 @@ export function AdminSettingsClient() {
           <CardTitle className="text-base">邮件配置</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* 连接状态徽标：服务端即时探测（真实连接 + 认证握手，不发信），随页面打开/保存/手动检测刷新 */}
+          {mail && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  mail.status === "connected"
+                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                    : mail.status === "error"
+                      ? "bg-red-500/15 text-red-600 dark:text-red-400"
+                      : "bg-muted text-muted-foreground"
+                }`}
+              >
+                {mail.status === "connected"
+                  ? "已连接 · SMTP 配置可用"
+                  : mail.status === "error"
+                    ? "连接失败"
+                    : "未配置 · 填写并保存后可检测"}
+              </span>
+              {mail.status === "error" && mail.error && (
+                <span className="max-w-md truncate text-xs text-muted-foreground" title={mail.error}>
+                  {mail.error}
+                </span>
+              )}
+              {mail.status === "connected" && mail.host && (
+                <span className="truncate text-xs text-muted-foreground">{mail.host}</span>
+              )}
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="smtp-host">SMTP 服务器</Label>
             <Input
@@ -1029,8 +1077,11 @@ export function AdminSettingsClient() {
             <Button variant="outline" onClick={sendTestMail} disabled={testing}>
               {testing ? <Loader2 className="animate-spin" /> : null} 发送测试邮件
             </Button>
+            <Button variant="outline" onClick={refreshMail} disabled={mailChecking} title="重新探测当前连接状态（不发信）">
+              {mailChecking ? <Loader2 className="animate-spin" /> : null} 检测连接
+            </Button>
           </div>
-          <p className="text-xs text-muted-foreground">测试邮件只发送至超级管理员邮箱，需先保存配置。</p>
+          <p className="text-xs text-muted-foreground">测试邮件只发送至超级管理员邮箱，需先保存配置；「检测连接」不发信，只验证连通与认证。</p>
         </CardContent>
       </Card>
         </TabsContent>

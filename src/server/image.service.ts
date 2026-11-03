@@ -281,6 +281,8 @@ export type ListParams = {
   take?: number;
   // 按存储位置过滤（local / r2:<下标> / r2 / r2b），我的照片筛选用
   storage?: string;
+  // 我的图片筛选：gallery=in 已入画廊（公开且已过审）/ out 未入；albumId 复用上方字段（mine 范围内 "none" 表示未归类）
+  gallery?: "in" | "out";
   // 日常记录筛选：按上传者用户名（管理员）与上传时间范围，可组合可单独使用
   owner?: string;
   from?: Date;
@@ -288,6 +290,20 @@ export type ListParams = {
   // 日常记录（虚拟相册）：仅统计图文动态关联的图片
   posted?: boolean;
 };
+
+// 「我的图片」筛选项（列表与跨页全选共用口径）：
+// - gallery=in：已入画廊 = 公开且已过审（与卡片「画廊」徽标口径一致）；out：未入（未过审或非公开）
+// - albumId="none"：未归类；其余值按相册 id 过滤（mine 范围已限定本人图片，无需再校验相册归属）
+function applyMineFilters(where: Record<string, unknown>, gallery?: "in" | "out", albumId?: string) {
+  if (gallery === "in") {
+    where.status = "PUBLISHED";
+    where.visibility = "PUBLIC";
+  } else if (gallery === "out") {
+    where.OR = [{ status: { not: "PUBLISHED" } }, { visibility: { not: "PUBLIC" } }];
+  }
+  if (albumId === "none") where.albumId = null;
+  else if (albumId) where.albumId = albumId;
+}
 
 export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; nextCursor: string | null; total: number }> {
   const take = Math.min(p.take ?? 24, 60);
@@ -307,6 +323,7 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
       where.deletedAt = null;
       // 图文动态的照片只在动态与本机 feed 里展示，不混进「我的图片」
       where.postId = null;
+      applyMineFilters(where, p.gallery, p.albumId);
       break;
     case "trash":
       where.userId = p.viewer.id;
@@ -400,13 +417,14 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
   return { items, nextCursor: hasMore ? rows[take - 1].id : null, total };
 }
 
-// 「我的图片」跨页全选：返回当前筛选（可选按存储位置）下全部未删除图片的 id
-export async function listMyImageIds(viewer: Viewer, storage?: string) {
+// 「我的图片」跨页全选：返回当前筛选（存储位置 / 画廊进出 / 相册归属）下全部未删除图片的 id
+export async function listMyImageIds(viewer: Viewer, storage?: string, gallery?: "in" | "out", albumId?: string) {
   const where: Record<string, unknown> = { userId: viewer.id, deletedAt: null, postId: null };
   if (storage) {
     if (!/^(local|r2(:\d+)?|r2b)$/.test(storage)) throw new AppError("无效的存储位置", 400);
     where.storage = storage;
   }
+  applyMineFilters(where, gallery, albumId);
   const rows = await prisma.image.findMany({
     where,
     select: { id: true },

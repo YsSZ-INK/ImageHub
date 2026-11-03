@@ -22,7 +22,8 @@ export default async function DashboardPage() {
     <div className="space-y-4">
       <h1 className="text-xl font-bold">我的图片</h1>
       <MyImagesClient
-        albums={albums.map((a) => ({ id: a.id, name: a.name }))}
+        // ownerName：管理员视角附带相册主人（超管可见全部人的相册，默认都叫「我的相册」，需要标注归属）
+        albums={albums.map((a) => ({ id: a.id, name: a.name, ownerName: a.ownerName }))}
         storages={storages}
       />
     </div>
