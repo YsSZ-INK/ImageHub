@@ -15,6 +15,8 @@ export default async function GalleryPage({
     viewer: user,
     scope: "gallery",
     sort: (sort as "newest") ?? "newest",
+    // 每页 60 张：2/4/6 列都能整除（30/15/10 行），避免最后一行留空位
+    take: 60,
   });
 
   return (

@@ -8,7 +8,9 @@ import { Pager } from "@/components/pager";
 import { useCursorPager } from "@/lib/use-cursor-pager";
 import type { ImageDTO } from "@/server/image.service";
 
-// 画廊视图：瀑布流/方格切换 + 翻页浏览（上一页/下一页 + 页码跳转，每页 60 张）
+// 画廊视图：方格/瀑布流切换 + 翻页浏览（上一页/下一页 + 页码跳转，每页 60 张）
+// 默认方格：等比方格行对齐，配合每页 60 张（列数可整除）不会在右下角留下空位；
+// 瀑布流按列高均衡分栏，末列天然可能短一截，需要时再手动切换
 export function GalleryView({
   initialItems,
   initialCursor,
@@ -24,8 +26,8 @@ export function GalleryView({
   emptyDescription?: string;
   showOwner?: boolean;
 }) {
-  const [layout, setLayout] = useState<"waterfall" | "grid">("waterfall");
-  const { items, page, hasNext, loading, gotoPage } = useCursorPager(query, { initialItems, initialCursor });
+  const [layout, setLayout] = useState<"waterfall" | "grid">("grid");
+  const { items, page, hasNext, loading, gotoPage } = useCursorPager(query, { initialItems, initialCursor, take: 60 });
 
   if (items.length === 0) {
     return <EmptyState title={emptyTitle} description={emptyDescription} />;

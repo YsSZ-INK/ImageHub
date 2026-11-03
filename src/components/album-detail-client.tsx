@@ -1,14 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Loader2, FolderMinus, FolderPlus, Trash2, X, Pencil, Image as ImageIcon, ChevronLeft, ChevronDown, Images, ImageOff } from "lucide-react";
+import { Loader2, FolderMinus, FolderPlus, Trash2, X, Pencil, Image as ImageIcon, ChevronLeft, ChevronDown, Images, ImageOff, Play, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { AlbumFormDialog } from "@/components/album-form-dialog";
 import { EmptyState } from "@/components/image-grid";
 import { VisibilityBadge } from "@/components/image-actions";
+import { Lightbox } from "@/components/lightbox";
+import { Pager } from "@/components/pager";
+import { useCursorPager } from "@/lib/use-cursor-pager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { shortDate } from "@/lib/utils";
@@ -37,40 +40,20 @@ export function AlbumDetailClient({
   showUploader?: boolean;
 }) {
   const [album, setAlbum] = useState(initialAlbum);
-  const [items, setItems] = useState<ImageDTO[]>(initialItems);
-  const [cursor, setCursor] = useState(initialCursor);
-  const [loading, setLoading] = useState(false);
+  // 与「我的图片」一致：游标翻页（上一页/下一页/跳页），首屏用服务端已渲染的数据
+  const { items, page, hasNext, loading, loadPage, gotoPage, totalPages } = useCursorPager(
+    { scope: "album", albumId: album.id },
+    { initialItems, initialCursor }
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batching, setBatching] = useState(false);
+  // 灯箱预览：当前页内索引
+  const [preview, setPreview] = useState<number | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   // 移动相册弹窗：目标相册列表懒加载（排除当前相册）
   const [moveOpen, setMoveOpen] = useState(false);
   const [albums, setAlbums] = useState<{ id: string; name: string }[]>([]);
   const [targetAlbum, setTargetAlbum] = useState("");
-
-  const load = useCallback(
-    async (reset: boolean) => {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({ scope: "album", albumId: album.id });
-        if (!reset && cursor) params.set("cursor", cursor);
-        const res = await fetch(`/api/images?${params}`);
-        const json = await res.json();
-        if (json.ok) {
-          setItems((prev) => (reset ? json.data.items : [...prev, ...json.data.items]));
-          setCursor(json.data.nextCursor);
-        }
-      } finally {
-        setLoading(false);
-      }
-    },
-    [album.id, cursor]
-  );
-
-  useEffect(() => {
-    load(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function toggle(id: string) {
     setSelected((s) => {
@@ -94,7 +77,8 @@ export function AlbumDetailClient({
       if (json.ok) {
         toast.success(`已处理 ${json.data.affected} 张图片`);
         setSelected(new Set());
-        load(true);
+        // 就地刷新当前页（ajax），不整页 reload
+        loadPage(page);
       } else toast.error(json.error);
     } finally {
       setBatching(false);
@@ -140,7 +124,7 @@ export function AlbumDetailClient({
       const json = await res.json();
       if (json.ok) {
         toast.success("已移出相册");
-        load(true);
+        loadPage(page);
       } else toast.error(json.error);
     } finally {
       setBatching(false);
@@ -196,25 +180,33 @@ export function AlbumDetailClient({
         </Button>
       </div>
 
-      {items.length === 0 ? (
+      {items.length === 0 && !loading ? (
         <EmptyState title="相册里还没有图片" description="在「我的图片」中批量选择图片并移动到该相册" />
       ) : (
         <>
           {/* 批量操作栏：常驻显示，未选中时禁用操作 */}
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <label className="flex cursor-pointer items-center gap-2">
+            {/* 选中本页开关 + 已选计数合并为一个控件（与「我的图片」一致） */}
+            <label className="flex cursor-pointer items-center gap-2" title="勾选选中本页全部图片，取消勾选清除本页选中">
               <input
                 type="checkbox"
-                checked={selected.size > 0 && selected.size === items.length}
-                onChange={(e) => setSelected(e.target.checked ? new Set(items.map((i) => i.id)) : new Set())}
+                checked={items.length > 0 && items.every((i) => selected.has(i.id))}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelected(new Set([...selected, ...items.map((i) => i.id)]));
+                  } else {
+                    const next = new Set(selected);
+                    items.forEach((i) => next.delete(i.id));
+                    setSelected(next);
+                  }
+                }}
               />
-              全选
+              <span className="text-sm text-muted-foreground">已选 {selected.size} 张</span>
             </label>
             <Button size="sm" variant="outline" className="text-sm" disabled={selected.size === 0} onClick={() => setSelected(new Set())} title="清空当前选中">
               取消全选
             </Button>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-muted-foreground">已选 {selected.size} 张</span>
               <Button size="sm" variant="outline" disabled={batching || selected.size === 0} onClick={batchRemove}>
                 <FolderMinus className="h-4 w-4" /> 移出相册
               </Button>
@@ -271,18 +263,54 @@ export function AlbumDetailClient({
             </div>
           </div>
 
-          {/* 带复选框的网格 */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8">
-            {items.map((img) => (
+          {/* 小字提醒：点图中央是放大细观（灯箱），点图其余处是选中 */}
+          <p className="text-xs text-muted-foreground">轻点图片中央，细观全貌；点其四周，即为选中</p>
+
+          {/* 带复选框的网格：视频用 <video> 取首帧并常驻播放键，图片走缩略图 */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+            {items.map((img, idx) => (
               <div key={img.id} className="group relative overflow-hidden rounded-lg border border-border">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={img.thumbUrl}
-                  alt={img.filename}
-                  loading="lazy"
-                  className="aspect-square w-full cursor-pointer bg-muted object-cover"
-                  onClick={() => toggle(img.id)}
-                />
+                {img.kind === "video" ? (
+                  // 视频没有缩略图：直接播首帧，点击卡片其余区域仍是选中
+                  <video
+                    src={img.rawUrl}
+                    preload="metadata"
+                    muted
+                    playsInline
+                    className="aspect-square w-full cursor-pointer bg-muted object-cover"
+                    onClick={() => toggle(img.id)}
+                  />
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={img.thumbUrl}
+                    alt={img.filename}
+                    loading="lazy"
+                    className="aspect-square w-full cursor-pointer bg-muted object-cover"
+                    onClick={() => toggle(img.id)}
+                  />
+                )}
+                {/* 正中按钮：视频为常驻播放键（不随鼠标现隐），图片为 hover 放大键；点击进灯箱，不触发选中 */}
+                <button
+                  type="button"
+                  aria-label={img.kind === "video" ? "播放" : "放大查看"}
+                  title={img.kind === "video" ? "播放" : "放大查看"}
+                  className={`absolute inset-0 m-auto flex items-center justify-center rounded-full text-white hover:bg-black/80 ${
+                    img.kind === "video"
+                      ? "h-12 w-12 bg-black/50"
+                      : "h-10 w-10 bg-black/60 opacity-0 transition-opacity group-hover:opacity-100"
+                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPreview(idx);
+                  }}
+                >
+                  {img.kind === "video" ? (
+                    <Play className="h-6 w-6 fill-white/90 text-white/90 drop-shadow-md" />
+                  ) : (
+                    <ZoomIn className="h-5 w-5" />
+                  )}
+                </button>
                 {/* 勾选按钮：未选中任何图片时 hover 才显示；本卡片已选中或页面有选中时常驻 */}
                 <label
                   className={`absolute left-2 top-2 cursor-pointer transition-opacity ${
@@ -340,14 +368,16 @@ export function AlbumDetailClient({
             ))}
           </div>
 
-          {cursor && (
-            <div className="flex justify-center py-4">
-              <Button variant="outline" onClick={() => load(false)} disabled={loading}>
-                {loading ? <Loader2 className="animate-spin" /> : null} 加载更多
-              </Button>
-            </div>
-          )}
+          {/* 翻页：与「我的图片」一致的游标分页（上一页 / 下一页 / 输入页码跳转） */}
+          <div className="mt-auto">
+            <Pager page={page} hasNext={hasNext} totalPages={totalPages} disabled={loading} onGo={gotoPage} />
+          </div>
         </>
+      )}
+
+      {/* 灯箱放大查看（当前页内可左右切换，ESC 关闭；相册内不提供旋转） */}
+      {preview !== null && (
+        <Lightbox images={items} index={preview} onClose={() => setPreview(null)} onNavigate={setPreview} />
       )}
 
       {/* 移动相册弹窗：把选中图片移到另一个相册 */}
