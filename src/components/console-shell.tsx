@@ -1,11 +1,9 @@
 import { requireUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 import { isAdminRole, isSuper } from "@/lib/roles";
-import { slotConfigured, slotDisplayName } from "@/lib/markers";
-import { prisma } from "@/lib/db";
 import { ConsoleTopBar, type NavGroup } from "@/components/console-topbar";
 import { SideNav } from "@/components/side-nav";
-import { StorageCards, type StorageCardsSnapshot } from "@/components/storage-cards";
+import { StorageCards } from "@/components/storage-cards";
 import { InkBackdrop } from "@/components/ink-theme";
 
 // icon 为字符串名，由 SideNav 客户端组件映射（图标组件不能跨 RSC 边界传递）
@@ -45,30 +43,6 @@ export async function ConsoleShell({ children }: { children: React.ReactNode }) 
   const user = await requireUser();
   const settings = await getSettings();
 
-  // 每个配置完整的 R2 桶槽位，底部各显示一张站点级存储用量卡片（R2 弹性容量，只显示已用）
-  const r2Slots = settings.r2Slots
-    .map((cfg, i) => ({ cfg, i }))
-    .filter(({ cfg }) => cfg.accessKeyId && cfg.bucket && slotConfigured(cfg));
-  // 本地磁盘上的图片文件占用（迁移到 R2 后会减少；头像不含在内）
-  const localAgg = await prisma.image.aggregate({ _sum: { size: true }, _count: true, where: { storage: "local" } });
-  const r2Aggs = r2Slots.length
-    ? await Promise.all(
-        r2Slots.map(({ i }) => prisma.image.aggregate({ _sum: { size: true }, _count: true, where: { storage: `r2:${i}` } }))
-      )
-    : [];
-  // 服务端渲染的初始快照；之后由 StorageCards 每 10 秒轮询局部刷新
-  const initialSnap: StorageCardsSnapshot = {
-    quota: Number(user.storageQuota),
-    localUsed: Number(localAgg._sum.size ?? 0),
-    localCount: localAgg._count,
-    slots: r2Slots.map(({ cfg, i }, n) => ({
-      marker: `r2:${i}`,
-      label: slotDisplayName(cfg, i, settings.r2Slots.length),
-      used: Number(r2Aggs[n]._sum.size ?? 0),
-      count: r2Aggs[n]._count,
-    })),
-  };
-
   // 「系统」分组：两级管理员可见；用户管理/存储迁移/站点设置仅超级管理员可见
   const adminGroup: NavGroup = isSuper(user.role)
     ? ADMIN_GROUP
@@ -94,8 +68,8 @@ export async function ConsoleShell({ children }: { children: React.ReactNode }) 
             ))}
           </div>
           <div className="border-t border-foreground/10 p-3">
-            {/* 存储卡片：初始服务端渲染，之后每 10 秒轮询局部刷新（迁移/上传后占用自动更新） */}
-            <StorageCards initial={initialSnap} isAdmin={isSuper(user.role)} />
+            {/* 存储卡片：客户端挂载后立即拉取并每 10 秒刷新（不阻塞页面首字节） */}
+            <StorageCards isAdmin={isSuper(user.role)} />
           </div>
         </aside>
         <main className="min-w-0 flex-1 p-4 md:p-6">

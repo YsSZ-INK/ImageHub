@@ -15,7 +15,7 @@ export const runtime = "nodejs";
  * - 校验可见性（防 IDOR），响应不暴露存储 key
  * - 视频（<video> 拖动进度条）依赖 Range 请求：支持单区间 bytes=start-end，返回 206
  */
-async function serveFile(req: Request, id: string, kind: "raw" | "thumb", download = false) {
+async function serveFile(req: Request, id: string, download = false) {
   const viewer = await getCurrentUser();
   // 匿名高频直链：公开图优先取缓存行快照（0 次查库）；未命中 / 非公开 / 登录用户走完整校验
   let img: PublicImageSnapshot | null = null;
@@ -23,10 +23,10 @@ async function serveFile(req: Request, id: string, kind: "raw" | "thumb", downlo
   if (!img) img = await getImageForView(id, viewer);
   // 按记录的实际存放位置取文件（local / r2）
   const storage = await getStorageFor(img.storage);
-  const key = kind === "thumb" ? img.thumbKey : img.storageKey;
+  const key = img.storageKey;
 
   const headers: Record<string, string> = {
-    "Content-Type": kind === "thumb" ? "image/webp" : img.mimeType,
+    "Content-Type": img.mimeType,
     "Cache-Control": `${viewer ? "private" : "public"}, max-age=31536000, immutable`,
     "X-Content-Type-Options": "nosniff",
   };
@@ -43,10 +43,10 @@ async function serveFile(req: Request, id: string, kind: "raw" | "thumb", downlo
   }
   // 视频（任意大小，需 Range 拖动）与超过缓存上限的图片走流式；其余图片走磁盘缓存路径
   const isVideo = img.mimeType.startsWith("video/");
-  const streamIfLarge = kind === "raw" && (isVideo || total > RAW_CACHE_MAX_FILE);
+  const streamIfLarge = isVideo || total > RAW_CACHE_MAX_FILE;
 
-  // Range 请求（仅原文件；缩略图恒为完整图片）：流式返回 206，视频首帧/拖动进度条只传所需区间
-  const rangeHeader = kind === "raw" ? req.headers.get("range") : null;
+  // Range 请求：流式返回 206，视频首帧/拖动进度条只传所需区间
+  const rangeHeader = req.headers.get("range");
   const match = rangeHeader ? /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim()) : null;
   if (match && (match[1] !== "" || match[2] !== "")) {
     let start: number;
@@ -101,10 +101,7 @@ async function serveFile(req: Request, id: string, kind: "raw" | "thumb", downlo
   // 小文件（图片为主）：整读返回；原图走磁盘 LRU 缓存——看过一次永久本地化，之后再访问免跨网回源
   let buf: Buffer;
   try {
-    buf =
-      kind === "raw" && !img.mimeType.startsWith("video/")
-        ? await getRawCached(`${img.storage}:${key}`, () => storage.get(key))
-        : await storage.get(key);
+    buf = isVideo ? await storage.get(key) : await getRawCached(`${img.storage}:${key}`, () => storage.get(key));
   } catch {
     throw new AppError("文件缺失", 404);
   }
@@ -114,5 +111,5 @@ async function serveFile(req: Request, id: string, kind: "raw" | "thumb", downlo
 
 export const GET = handle(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
-  return serveFile(req, id, "raw", new URL(req.url).searchParams.get("download") === "1");
+  return serveFile(req, id, new URL(req.url).searchParams.get("download") === "1");
 });

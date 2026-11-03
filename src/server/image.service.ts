@@ -6,10 +6,10 @@ import { logActivity } from "@/server/audit.service";
 import { notifyAdmins } from "@/lib/mailer";
 import { hasAccessTo } from "@/server/access.service";
 import { getStorageFor } from "@/lib/storage";
-import { invalidateThumb } from "@/lib/thumb-cache";
+import { invalidateThumb, thumbKey, THUMB_WIDTHS, THUMB_FORMATS } from "@/lib/thumb-cache";
 import { invalidateRaw } from "@/lib/raw-cache";
 import sharp from "sharp";
-import { processAndStoreImage, processAndStoreVideo, processAndStoreVideoFile, detectVideoMime } from "@/lib/image";
+import { processAndStoreImage, processAndStoreVideo, detectVideoMime } from "@/lib/image";
 import { localUsageOf } from "@/server/storage-stats";
 import type { User, Image } from "@prisma/client";
 import type { z } from "zod";
@@ -103,7 +103,7 @@ export async function getImageForView(id: string, viewer: Viewer | null, include
 }
 
 // 直链文件服务所需的字段快照（raw/thumb 高频读缓存的值类型）
-export type PublicImageSnapshot = Pick<Image, "id" | "mimeType" | "storage" | "storageKey" | "thumbKey" | "filename">;
+export type PublicImageSnapshot = Pick<Image, "id" | "mimeType" | "storage" | "storageKey" | "thumbKey" | "filename" | "version">;
 
 // 匿名直链快速路径：缓存「匿名可见」图片行（已发布 + 公开），raw/thumb 免查库直出。
 // Redis 30 秒 / 进程内存兜底；友链需登录（不缓存）、私有/审核中/已删除不缓存，每次走完整校验。
@@ -119,6 +119,7 @@ export async function getImageForPublicView(id: string): Promise<PublicImageSnap
         storageKey: true,
         thumbKey: true,
         filename: true,
+        version: true,
         visibility: true,
         status: true,
         deletedAt: true,
@@ -297,6 +298,8 @@ export type ListParams = {
   to?: Date;
   // 日常记录（虚拟相册）：仅统计图文动态关联的图片
   posted?: boolean;
+  // 是否返回匹配总数（用于显示「共 N 页」）；画廊不显示页数，可省掉一次 COUNT 全表扫描
+  withTotal?: boolean;
 };
 
 // 「我的图片」筛选项（列表与跨页全选共用口径）：
@@ -417,7 +420,7 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
       ...(p.cursor ? { cursor: { id: p.cursor }, skip: 1 } : {}),
       include: { user: { select: { name: true } } },
     }),
-    prisma.image.count({ where }), // 总数：前端据此显示「共 N 页」
+    p.withTotal === false ? Promise.resolve(0) : prisma.image.count({ where }), // 总数：前端据此显示「共 N 页」
   ]);
 
   const hasMore = rows.length > take;
@@ -524,10 +527,11 @@ export async function rotateImage(id: string, viewer: Viewer, dir: "left" | "rig
     },
   });
 
-  // 失效各级缓存：直链快照（Redis/内存）+ 缩略图两级缓存 + 原图磁盘缓存
+  // 失效各级缓存：直链快照（Redis/内存）+ 全部宽度/格式的缩略图 + 原图磁盘缓存
   await invalidateImageView(id);
-  invalidateThumb(`${img.storage}:${img.storageKey}:gen400`);
-  invalidateThumb(`${img.storage}:${img.storageKey}:2560`);
+  for (const w of THUMB_WIDTHS) {
+    for (const f of THUMB_FORMATS) invalidateThumb(thumbKey(img.storage, img.storageKey, w, f));
+  }
   invalidateRaw(`${img.storage}:${img.storageKey}`);
 
   await logActivity(viewer.id, "rotate", `把「${img.filename}」${dir === "left" ? "逆时针" : "顺时针"}旋转 90°`);
@@ -554,13 +558,6 @@ export async function clearAlbumCovers(imageIds: string[], excludeAlbumId?: stri
   });
 }
 
-export async function restoreImage(id: string, viewer: Viewer) {
-  await assertOwnership(id, viewer);
-  const img = await prisma.image.update({ where: { id }, data: { deletedAt: null } });
-  await invalidateImageView(id);
-  return img;
-}
-
 // 彻底删除：同时删除存储对象（按记录的实际存放位置）；配额为实时聚合，无需扣减
 export async function purgeImage(id: string, viewer: Viewer) {
   const img = await assertOwnership(id, viewer);
@@ -581,6 +578,14 @@ export async function purgeExpiredTrash() {
   for (const img of expired) {
     await purgeImage(img.id, viewer).catch(() => {});
   }
+}
+
+// 请求路径上的懒清理：每小时最多跑一次（否则每次翻页/筛选都扫一遍库）
+let lastPurgeAt = 0;
+export function purgeExpiredTrashLazy() {
+  if (Date.now() - lastPurgeAt < 3600_000) return;
+  lastPurgeAt = Date.now();
+  void purgeExpiredTrash().catch(() => {});
 }
 
 // ============ 批量操作 ============

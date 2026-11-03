@@ -20,7 +20,6 @@ export type StorageSnapshot = {
 // filterUserId 非空时仅统计该用户的占用——普通用户不需要看到全站存储分布；
 // 全站聚合（filterUserId 为 null）仅管理员侧调用
 export async function storageSnapshot(
-  userId: string,
   quota: bigint,
   slotMarkers: string[],
   filterUserId?: string | null

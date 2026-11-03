@@ -1,6 +1,6 @@
 import { handle, ok } from "@/lib/api";
 import { requireApiUser } from "@/lib/session";
-import { listImages, purgeExpiredTrash } from "@/server/image.service";
+import { listImages, purgeExpiredTrashLazy } from "@/server/image.service";
 import type { ListParams } from "@/server/image.service";
 
 export const runtime = "nodejs";
@@ -18,8 +18,8 @@ export const GET = handle(async (req: Request) => {
   const url = new URL(req.url);
   const scope = (url.searchParams.get("scope") ?? "mine") as ListParams["scope"];
 
-  // 打开个人面板时懒清理过期回收站
-  if (scope === "trash" || scope === "mine") purgeExpiredTrash().catch(() => {});
+  // 打开个人面板时懒清理过期回收站（每小时最多一次）
+  if (scope === "trash" || scope === "mine") purgeExpiredTrashLazy();
 
   const { items, nextCursor, total } = await listImages({
     viewer,
@@ -40,6 +40,8 @@ export const GET = handle(async (req: Request) => {
     to: parseDate(url.searchParams.get("to")),
     // 日常记录（虚拟相册）：仅统计图文动态关联的图片
     posted: url.searchParams.get("posted") === "1" ? true : undefined,
+    // 画廊分页不显示总页数，省掉一次 COUNT 全表扫描
+    withTotal: scope !== "gallery",
   });
   return ok({ items, nextCursor, total });
 });

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ImageOff, Play } from "lucide-react";
 import { Lightbox } from "@/components/lightbox";
 import { VisibilityBadge, ImageActions, RestoreButton } from "@/components/image-actions";
-import { preloadRaw } from "@/lib/utils";
+import { preloadRaw, thumbSrcSet, GRID_SIZES, MASONRY_SIZES, EAGER_COUNT } from "@/lib/utils";
 import type { ImageDTO } from "@/server/image.service";
 
 // 网格只负责缩略图。原图预取仅在「鼠标悬停」且设备支持 hover 时进行：
@@ -39,7 +39,7 @@ export function ImageGrid({
   if (items.length === 0) return null;
 
   const visible = items.filter((i) => !failed.has(i.id));
-  const card = (img: ImageDTO) => (
+  const card = (img: ImageDTO, idx: number) => (
     <figure
       key={img.id}
       className="group relative overflow-hidden rounded-xl border border-border/70 bg-muted/30 transition-[transform,border-color,box-shadow] duration-300 hover:-translate-y-0.5 hover:border-foreground/20 hover:shadow-lg hover:shadow-foreground/10"
@@ -57,7 +57,7 @@ export function ImageGrid({
             preload="metadata"
             muted
             playsInline
-            onClick={() => setLightbox(items.indexOf(img))}
+            onClick={() => setLightbox(idx)}
             className={`w-full cursor-zoom-in bg-muted object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03] ${layout === "grid" ? "aspect-square" : ""}`}
           />
           <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -68,11 +68,14 @@ export function ImageGrid({
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={img.thumbUrl}
+          srcSet={thumbSrcSet(img.thumbUrl)}
+          sizes={layout === "grid" ? GRID_SIZES : MASONRY_SIZES}
           alt={img.filename}
-          loading="lazy"
+          loading={idx < EAGER_COUNT ? "eager" : "lazy"}
+          fetchPriority={idx < EAGER_COUNT ? "high" : "auto"}
           decoding="async"
           onMouseEnter={() => hoverPreload(img.rawUrl)}
-          onClick={() => setLightbox(items.indexOf(img))}
+          onClick={() => setLightbox(idx)}
           onError={() => setFailed((s) => new Set(s).add(img.id))}
           className={`w-full cursor-zoom-in bg-muted object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03] ${layout === "grid" ? "aspect-square" : ""}`}
           style={

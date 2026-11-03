@@ -61,6 +61,27 @@ async function writeDisk(key: string, buf: Buffer) {
   }
 }
 
+// 生成限流：画廊/列表一次挂载几十张缩略图，同时跑 sharp 会把小核 CPU 打满（SSH、反代都会被饿死）。
+// 全局同时生成张数限制为 CPU-1；排队请求共享同一个 inflight 任务，不会重复生成
+const MAX_GENERATE = Math.min(2, Math.max(1, os.cpus().length - 1));
+let generating = 0;
+const waiting: (() => void)[] = [];
+
+async function acquireSlot() {
+  if (generating < MAX_GENERATE) {
+    generating++;
+    return;
+  }
+  await new Promise<void>((resolve) => waiting.push(resolve));
+  // 名额由 releaseSlot 直接转交，这里不再加 generating
+}
+
+function releaseSlot() {
+  const next = waiting.shift();
+  if (next) next();
+  else generating--;
+}
+
 export function getThumb(key: string, loader: () => Promise<Buffer>): Promise<Buffer> {
   const hit = map.get(key);
   if (hit) {
@@ -74,20 +95,39 @@ export function getThumb(key: string, loader: () => Promise<Buffer>): Promise<Bu
     const disk = await readDisk(key);
     if (disk) {
       store(key, disk);
-      inflight.delete(key);
       return disk;
     }
-    const buf = await loader();
-    store(key, buf);
-    void writeDisk(key, buf);
+    // 生成前排队，避免并发把 CPU 打满
+    await acquireSlot();
+    try {
+      // 排队期间同 key 可能已被生成（内存里已经有了）
+      const cached = map.get(key);
+      if (cached) {
+        touch(key, cached);
+        return cached;
+      }
+      const buf = await loader();
+      store(key, buf);
+      void writeDisk(key, buf);
+      return buf;
+    } finally {
+      releaseSlot();
+    }
+  })().finally(() => {
     inflight.delete(key);
-    return buf;
-  })().catch((err) => {
-    inflight.delete(key);
-    throw err;
   });
   inflight.set(key, task);
   return task;
+}
+
+// 缩略图缓存键：存储标记 + 对象键 + 目标宽度 + 输出格式。
+// 统一在这里拼，避免路由、上传预热、旋转失效三处字符串漂移导致缓存不命中/失效不到
+export type ThumbFormat = "avif" | "webp";
+export const THUMB_WIDTHS = [400, 800, 1600, 2560] as const;
+export const THUMB_FORMATS: ThumbFormat[] = ["avif", "webp"];
+
+export function thumbKey(storage: string, storageKey: string, width: number, fmt: ThumbFormat) {
+  return `${storage}:${storageKey}:w${width}:${fmt}`;
 }
 
 // 上传时已生成好缩略图：直接进两级缓存，首次访问零生成

@@ -156,7 +156,7 @@ export async function completeChunkUpload(
           total += b.length;
           hash.update(b);
         });
-        rs.on("error", (e) => {
+        rs.on("error", () => {
           ws.destroy();
           reject(new AppError(`第 ${i + 1} 片不可读，请重新上传该片`, 400));
         });

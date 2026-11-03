@@ -130,7 +130,7 @@ export async function changePassword(user: User, input: z.infer<typeof changePas
 }
 
 export async function updateAvatar(user: User, buf: Buffer): Promise<User> {
-  const key = await processAndStoreAvatar(buf, user.id);
+  await processAndStoreAvatar(buf, user.id);
   const avatarUrl = `/api/avatars/${user.id}?v=${Date.now()}`;
   return prisma.user.update({ where: { id: user.id }, data: { avatarUrl } });
 }

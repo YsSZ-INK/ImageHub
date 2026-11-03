@@ -4,12 +4,14 @@
  */
 import { getSettings } from "@/lib/settings";
 import { AppError } from "@/lib/api";
+import { slotConfigured, slotDisplayName } from "@/lib/markers";
+import { prisma } from "@/lib/db";
+import { notifySupers } from "@/lib/mailer";
+import type { Readable } from "stream";
 
 export interface PutOptions {
   contentType: string;
 }
-
-import type { Readable } from "stream";
 
 export interface Storage {
   put(key: string, data: Buffer, opts: PutOptions): Promise<void>;
@@ -55,10 +57,6 @@ function getR2Storage(cfg: {
   return cached;
 }
 
-// R2 槽位显示名（R2 一 / R2 二 / …），供设置页、迁移与用量卡片共用
-export { markerBadgeClass, markerLabel, slotConfigured, slotDisplayName, slotEndpoint, type SlotType } from "@/lib/markers";
-import { slotConfigured, slotDisplayName } from "@/lib/markers";
-
 // 位置标记 → R2 槽位下标（r2:0 / r2:1 / …；兼容早期 r2、r2b）
 export function r2SlotIndex(marker: string): number {
   if (marker.startsWith("r2:")) return Number.parseInt(marker.slice(3), 10) || 0;
@@ -84,22 +82,7 @@ export async function getStorageFor(marker: string): Promise<Storage> {
   return getLocalStorage();
 }
 
-// 当前站点设置的默认存储（新上传写入用）
-export async function getStorage(): Promise<Storage> {
-  const s = await getSettings();
-  if (s.storageDriver === "r2") return getStorageFor(`r2:${s.r2UploadSlot}`);
-  return getLocalStorage();
-}
-
-// 当前上传目标的位置标记（写入 Image.storage 用）
-export async function getUploadMarker(): Promise<string> {
-  const s = await getSettings();
-  return s.storageDriver === "r2" ? `r2:${s.r2UploadSlot}` : "local";
-}
-
 // ============ 上传写入：对象存储失败自动降级本地 + 邮件提醒管理员 ============
-import { prisma } from "@/lib/db";
-import { notifySupers } from "@/lib/mailer";
 
 // 降级提醒去抖：24 小时内最多发一封（Setting 表记录上次发送时间，重启不丢）
 const FALLBACK_MAIL_KEY = "lastR2FallbackMailAt";

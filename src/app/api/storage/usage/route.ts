@@ -19,7 +19,6 @@ export const GET = handle(async () => {
     .map((cfg, i) => ({ cfg, i }))
     .filter(({ cfg }) => cfg.accessKeyId && cfg.bucket && slotConfigured(cfg));
   const snap = await storageSnapshot(
-    user.id,
     user.storageQuota,
     active.map(({ i }) => `r2:${i}`),
     isAdminRole(user.role) ? null : user.id

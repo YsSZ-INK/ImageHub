@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2, FolderPlus, Eye, Trash2, X, Link2, UploadCloud, ChevronDown, ZoomIn, Play, Images, ImageOff, Copy } from "lucide-react";
+import { Loader2, FolderPlus, Trash2, X, Link2, UploadCloud, ChevronDown, ZoomIn, Play, Images, ImageOff, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
-import { ImageGrid, EmptyState } from "@/components/image-grid";
+import { EmptyState } from "@/components/image-grid";
 import { Lightbox } from "@/components/lightbox";
 import { Pager } from "@/components/pager";
 import { UploadDropzone } from "@/components/upload-dropzone";
@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useCursorPager } from "@/lib/use-cursor-pager";
-import { formatBytes } from "@/lib/utils";
+import { formatBytes, thumbSrcSet, GRID_SIZES, EAGER_COUNT } from "@/lib/utils";
 import { markerLabel, markerBadgeClass } from "@/lib/markers";
 import type { ImageDTO } from "@/server/image.service";
 
@@ -291,8 +291,11 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                   /* eslint-disable-next-line @next/next/no-img-element */
                   <img
                     src={img.thumbUrl}
+                    srcSet={thumbSrcSet(img.thumbUrl)}
+                    sizes={GRID_SIZES}
                     alt={img.filename}
-                    loading="lazy"
+                    loading={idx < EAGER_COUNT ? "eager" : "lazy"}
+                    decoding="async"
                     className="aspect-square w-full cursor-pointer bg-muted object-cover"
                     onClick={() => toggle(img.id)}
                   />

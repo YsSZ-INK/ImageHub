@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { isAdminRole } from "@/lib/roles";
-import { Images, LayoutDashboard, Shield, LogOut, Menu } from "lucide-react";
+import { Images, LayoutDashboard, LogOut, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -25,9 +25,12 @@ export function SiteHeader({ siteName, user }: Props) {
   const router = useRouter();
 
   async function logout() {
-    await signOut({ redirect: false });
-    router.push("/");
-    router.refresh();
+    // 整页跳转式退出：即使客户端路由卡住，也能真正发出退出请求并回到登录页
+    try {
+      await signOut({ callbackUrl: "/" });
+    } catch {
+      window.location.assign("/");
+    }
   }
 
   return (

@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import Image from "next/image";
 import { Lock, Images, Upload, ShieldCheck, Brush } from "lucide-react";
 import { getCurrentUser } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
@@ -34,7 +33,9 @@ export default async function HomePage() {
     <main className="relative flex min-h-screen flex-col overflow-hidden">
       {/* ===== 背景层：水墨画真图（随机一幅）+ 透明遮罩 + 纸纹 ===== */}
       <div aria-hidden className="absolute inset-0 -z-10">
-        <Image src={bg} alt="" fill priority sizes="100vw" className="object-cover" />
+        {/* 背景图固定铺满：原生 img + fetchPriority 提前加载（少一个 next/image 运行时代码块） */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={bg} alt="" fetchPriority="high" className="absolute inset-0 h-full w-full object-cover" />
         {/* 透明遮罩：亮色留白提亮 / 暗色压暗，保证前景可读 */}
         <div className="absolute inset-0 bg-gradient-to-br from-white/45 via-transparent to-white/60 dark:from-black/55 dark:via-black/25 dark:to-black/70" />
         {/* 宣纸纹理 */}

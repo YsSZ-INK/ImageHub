@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch, Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/controls";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AdminLogsClient } from "@/components/admin-logs-client";
 import type { R2SlotConfig, SiteSettings } from "@/lib/settings";
@@ -688,9 +689,6 @@ export function AdminSettingsClient() {
       </div>
     );
   }
-
-  // 更新表单局部字段
-  const upd = (patch: Partial<SiteSettings>) => setForm({ ...form, ...patch });
 
   // 更新某个 R2 槽位的字段
   const updSlot = (i: number, patch: Partial<R2SlotConfig>) =>

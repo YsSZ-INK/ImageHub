@@ -2,8 +2,8 @@ import sharp from "sharp";
 import { createHash, randomBytes } from "crypto";
 import { createReadStream, promises as fs } from "fs";
 import { encode } from "blurhash";
-import { getStorageFor, getLocalStorage, putUpload, putStreamUpload } from "@/lib/storage";
-import { prewriteThumb } from "@/lib/thumb-cache";
+import { getLocalStorage, putUpload, putStreamUpload } from "@/lib/storage";
+import { prewriteThumb, thumbKey } from "@/lib/thumb-cache";
 import { AppError } from "@/lib/api";
 
 // 允许的图片类型白名单
@@ -144,10 +144,21 @@ export async function processAndStoreImage(
   }
 
   // 缩略图与 blurhash 并行处理（互不依赖）
-  const thumbTask =
+  // 400 档同时出 WebP 与 AVIF：现代浏览器都会优先拿 AVIF，上传时就备好，首次浏览零等待
+  const resizeThumb = () =>
     mime === "image/gif"
-      ? sharp(buf, { animated: false }).resize({ width: 400, withoutEnlargement: true }).webp().toBuffer()
-      : sharp(mainBuf).resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true }).webp().toBuffer();
+      ? sharp(buf, { animated: false }).resize({ width: 400, withoutEnlargement: true })
+      : sharp(mainBuf).resize({ width: 400, height: 400, fit: "inside", withoutEnlargement: true });
+  // GIF 缩略图路由直接回原图（保动画），无需预热
+  const thumbTask =
+    mime === "image/gif" ? Promise.resolve(null) : resizeThumb().webp().toBuffer();
+  const avifTask =
+    mime === "image/gif"
+      ? Promise.resolve(null)
+      : resizeThumb()
+          .avif({ quality: 55 })
+          .toBuffer()
+          .catch(() => null); // AVIF 编码失败不影响上传（首次访问回退 WebP）
   const blurTask = (async (): Promise<string | null> => {
     try {
       // blurhash 占位图（小尺寸采样）
@@ -161,7 +172,7 @@ export async function processAndStoreImage(
       return null; // blurhash 失败不阻塞上传
     }
   })();
-  const [thumbBuf, blurhash] = await Promise.all([thumbTask, blurTask]);
+  const [thumbBuf, thumbAvif, blurhash] = await Promise.all([thumbTask, avifTask, blurTask]);
 
   // 按站点设置的存储位置写入（新上传都进当前目标），并记录位置到 Image.storage（local 或 r2:<桶下标>）
   // 对象存储写失败（桶满/欠费/网络）时 putUpload 自动降级本地并邮件提醒管理员
@@ -171,7 +182,8 @@ export async function processAndStoreImage(
 
   // 缩略图不上传存储（省流量省桶空间）：只写本地两级缓存（内存 + storage/.thumbs/），每天自动清一次
   // 缓存 key 与 thumb 路由的生成 key 一致，首次访问直接命中
-  prewriteThumb(`${marker}:${storageKey}:gen400`, thumbBuf);
+  if (thumbBuf) prewriteThumb(thumbKey(marker, storageKey, 400, "webp"), thumbBuf);
+  if (thumbAvif) prewriteThumb(thumbKey(marker, storageKey, 400, "avif"), thumbAvif);
 
   return {
     filename: sanitizeName(originalName),

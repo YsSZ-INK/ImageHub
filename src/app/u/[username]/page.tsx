@@ -4,8 +4,7 @@ import { listImages, listAlbums } from "@/server/image.service";
 import { getSettings } from "@/lib/settings";
 import { SiteHeader } from "@/components/site-header";
 import { GalleryView } from "@/components/gallery-view";
-import { ImageGrid, EmptyState } from "@/components/image-grid";
-import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/image-grid";
 import Link from "next/link";
 import { Folder } from "lucide-react";
 

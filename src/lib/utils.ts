@@ -53,3 +53,15 @@ export function preloadRaw(url: string) {
   const img = new Image();
   img.src = url;
 }
+
+// 缩略图路由支持 ?w= 四档宽度：交给浏览器按屏宽自动挑最小够用的一档，省流量也更快出图
+export function thumbSrcSet(url: string) {
+  return [400, 800, 1600].map((w) => `${url}&w=${w} ${w}w`).join(", ");
+}
+
+// 等比方格网格（2/4/6 列）与瀑布流（2/3/4/5 列）的实际显示宽度，供 srcset 选档
+export const GRID_SIZES = "(min-width: 1024px) 16vw, (min-width: 640px) 25vw, 50vw";
+export const MASONRY_SIZES = "(min-width: 1536px) 19vw, (min-width: 1024px) 24vw, (min-width: 640px) 33vw, 50vw";
+
+// 首屏前几张不懒加载，避免「缩略图先等着」的观感；其余继续 lazy
+export const EAGER_COUNT = 8;

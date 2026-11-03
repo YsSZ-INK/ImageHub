@@ -203,7 +203,7 @@ export function Lightbox({
             {!hdLoaded && (
               <img
                 key={`${img.id}-pv`}
-                src={`${img.thumbUrl}&w=2560`}
+                src={`${img.thumbUrl}&w=${typeof window !== "undefined" && window.innerWidth < 1280 ? 1600 : 2560}`}
                 alt=""
                 aria-hidden
                 onLoad={() => setPreviewLoaded(true)}

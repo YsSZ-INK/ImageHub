@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { Checkbox } from "@/components/ui/controls";
+import { Checkbox } from "@/components/ui/checkbox";
 import { formatBytes } from "@/lib/utils";
 import { markerLabel, markerBadgeClass } from "@/lib/markers";
 import type { MigrationStatus } from "@/server/migration.service";

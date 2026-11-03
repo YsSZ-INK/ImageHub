@@ -21,12 +21,6 @@ export const registerSchema = z.object({
   setupToken: z.string().max(200).optional(),
 });
 
-export const loginSchema = z.object({
-  email: z.string().email("邮箱格式不正确"),
-  password: z.string().min(1, "请输入密码"),
-  remember: z.boolean().optional(),
-});
-
 export const profileSchema = z.object({
   name: registerSchema.shape.name.optional(),
   // 头像直接作为 <img src> 使用，仅允许 http(s) 外链
