@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { Images, Menu, LogOut, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,6 @@ type Props = {
 
 /** 深色顶栏：左站名 / 中当前页标题 / 右用户菜单（标题由路径在 navGroups 中匹配） */
 export function ConsoleTopBar({ siteName, user, navGroups }: Props) {
-  const router = useRouter();
   const pathname = usePathname();
 
   const flat = navGroups.flatMap((g) => g.items);
@@ -37,9 +36,12 @@ export function ConsoleTopBar({ siteName, user, navGroups }: Props) {
   const title = matched?.label ?? "";
 
   async function logout() {
-    await signOut({ redirect: false });
-    router.push("/");
-    router.refresh();
+    // 走整页跳转式退出：即使客户端路由卡住，也能真正发出退出请求并回到登录页
+    try {
+      await signOut({ callbackUrl: "/" });
+    } catch {
+      window.location.assign("/");
+    }
   }
 
   return (
