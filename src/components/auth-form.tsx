@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -27,6 +27,12 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
   const [regData, setRegData] = useState({ email: "", name: "", password: "" });
   const [loading, setLoading] = useState(false);
 
+  // 登录成功后要跳转的页面提前预取：用户填写账号密码的这段时间里把目标页的数据准备好，
+  // 登录完成即可直接渲染，省掉一次「等跳转 → 等服务端渲染」的空白期
+  useEffect(() => {
+    router.prefetch(callbackUrl);
+  }, [router, callbackUrl]);
+
   async function doLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -44,8 +50,8 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
         else if (res.code === "CALLBACK_ERROR") toast.error("登录失败");
         else toast.error("邮箱或密码错误");
       } else {
+        // 直接进入目标页；不再额外 refresh（那会对当前登录页再发一次 RSC 请求，纯属浪费）
         router.push(callbackUrl);
-        router.refresh();
       }
     } finally {
       setLoading(false);
@@ -75,7 +81,6 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
       });
       if (!login?.error) {
         router.push(callbackUrl);
-        router.refresh();
       }
     } finally {
       setLoading(false);

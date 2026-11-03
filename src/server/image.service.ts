@@ -305,6 +305,8 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
     case "mine":
       where.userId = p.viewer.id;
       where.deletedAt = null;
+      // 图文动态的照片只在动态与本机 feed 里展示，不混进「我的图片」
+      where.postId = null;
       break;
     case "trash":
       where.userId = p.viewer.id;
@@ -400,7 +402,7 @@ export async function listImages(p: ListParams): Promise<{ items: ImageDTO[]; ne
 
 // 「我的图片」跨页全选：返回当前筛选（可选按存储位置）下全部未删除图片的 id
 export async function listMyImageIds(viewer: Viewer, storage?: string) {
-  const where: Record<string, unknown> = { userId: viewer.id, deletedAt: null };
+  const where: Record<string, unknown> = { userId: viewer.id, deletedAt: null, postId: null };
   if (storage) {
     if (!/^(local|r2(:\d+)?|r2b)$/.test(storage)) throw new AppError("无效的存储位置", 400);
     where.storage = storage;
