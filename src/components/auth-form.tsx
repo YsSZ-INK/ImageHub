@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -31,13 +31,24 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
   // 优先软导航——布局与骨架屏（app/(console)/loading.tsx）立即可见，数据在骨架里补齐，
   // 不用等整页 HTML 渲染完才「进去」。
   // 3.5 秒后若仍停在登录页（软导航被中间件按旧状态弹回等极端情况），兜底整页跳转。
+  // 用 replace 而不是 push：登录页不留在历史里，否则手机按返回键会退回登录页（bfcache 直接还原旧页面）。
   function enterConsole() {
     const from = window.location.pathname;
-    router.push(callbackUrl);
+    router.replace(callbackUrl);
     window.setTimeout(() => {
-      if (window.location.pathname === from) window.location.assign(callbackUrl);
+      if (window.location.pathname === from) window.location.replace(callbackUrl);
     }, 3500);
   }
+
+  // 兼容修复前已经登录、历史里仍留着登录页的用户：
+  // 从 bfcache 恢复（persisted=true）时，凭当前会话直接跳进控制台，不再显示登录表单
+  useEffect(() => {
+    function onPageShow(e: PageTransitionEvent) {
+      if (e.persisted) window.location.replace(callbackUrl);
+    }
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, [callbackUrl]);
 
   async function doLogin(e: React.FormEvent) {
     e.preventDefault();

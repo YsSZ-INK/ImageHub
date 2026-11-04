@@ -11,7 +11,7 @@ import { EmptyState } from "@/components/image-grid";
 import { Lightbox } from "@/components/lightbox";
 import { Pager } from "@/components/pager";
 import { useCursorPager } from "@/lib/use-cursor-pager";
-import { shortDate } from "@/lib/utils";
+import { shortDate, videoCoverSrc } from "@/lib/utils";
 
 // 日常记录（虚拟相册，仅管理员可见）：自动汇总所有图文动态发布的照片，每张照片带「@上传者 · 时间」标记。
 // 照片随发布移出原相册、统一归入这里；支持按上传者用户名 + 上传时间范围筛选，可组合、可单独使用。
@@ -132,7 +132,7 @@ export function DailyAlbumClient() {
                 <div className="relative">
                   {img.kind === "video" ? (
                     <video
-                      src={img.rawUrl}
+                      src={videoCoverSrc(img.rawUrl)}
                       preload="metadata"
                       muted
                       playsInline

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ImageOff, Play } from "lucide-react";
 import { Lightbox } from "@/components/lightbox";
 import { VisibilityBadge, ImageActions, RestoreButton } from "@/components/image-actions";
-import { preloadRaw, thumbSrcSet, GRID_SIZES, MASONRY_SIZES, EAGER_COUNT } from "@/lib/utils";
+import { preloadRaw, thumbSrcSet, GRID_SIZES, MASONRY_SIZES, EAGER_COUNT, videoCoverSrc } from "@/lib/utils";
 import type { ImageDTO } from "@/server/image.service";
 
 // 网格只负责缩略图。原图预取仅在「鼠标悬停」且设备支持 hover 时进行：
@@ -53,7 +53,7 @@ export function ImageGrid({
         // 视频无缩略图：<video> 首帧做卡片 + 播放角标，点击进灯箱播放
         <>
           <video
-            src={img.rawUrl}
+            src={videoCoverSrc(img.rawUrl)}
             preload="metadata"
             muted
             playsInline

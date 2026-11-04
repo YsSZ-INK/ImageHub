@@ -14,7 +14,7 @@ import { Pager } from "@/components/pager";
 import { useCursorPager } from "@/lib/use-cursor-pager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { shortDate } from "@/lib/utils";
+import { shortDate, videoCoverSrc } from "@/lib/utils";
 import type { ImageDTO } from "@/server/image.service";
 
 type AlbumInfo = {
@@ -273,7 +273,7 @@ export function AlbumDetailClient({
                 {img.kind === "video" ? (
                   // 视频没有缩略图：直接播首帧，点击卡片其余区域仍是选中
                   <video
-                    src={img.rawUrl}
+                    src={videoCoverSrc(img.rawUrl)}
                     preload="metadata"
                     muted
                     playsInline

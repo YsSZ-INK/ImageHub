@@ -10,7 +10,7 @@ import { DateField } from "@/components/date-field";
 import { Lightbox } from "@/components/lightbox";
 import { AvatarFallbackIcon } from "@/components/avatar";
 import { EmptyState } from "@/components/image-grid";
-import { cn } from "@/lib/utils";
+import { cn, videoCoverSrc } from "@/lib/utils";
 import type { ImageDTO } from "@/server/image.service";
 
 type FeedImage = Omit<ImageDTO, "createdAt"> & { createdAt: string };
@@ -301,7 +301,7 @@ function Composer({
                 <div key={p.url} className="group relative overflow-hidden rounded-lg border border-border">
                   {p.isVideo ? (
                     <>
-                      <video src={p.url} preload="metadata" muted playsInline className="aspect-square w-full bg-muted object-cover" />
+                      <video src={videoCoverSrc(p.url)} preload="metadata" muted playsInline className="aspect-square w-full bg-muted object-cover" />
                       <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
                         <Play className="h-6 w-6 fill-white/90 text-white/90 drop-shadow-md" />
                       </span>
@@ -397,7 +397,7 @@ function PostCard({
             post.images[0].kind === "video" ? (
               <div className="relative mt-2 inline-block cursor-pointer" onClick={() => onPreview({ images: post.images, index: 0 })}>
                 <video
-                  src={post.images[0].rawUrl}
+                  src={videoCoverSrc(post.images[0].rawUrl)}
                   preload="metadata"
                   muted
                   playsInline
@@ -428,7 +428,7 @@ function PostCard({
                 img.kind === "video" ? (
                   <div key={img.id} className="relative cursor-pointer" onClick={() => onPreview({ images: post.images, index: i })}>
                     <video
-                      src={img.rawUrl}
+                      src={videoCoverSrc(img.rawUrl)}
                       preload="metadata"
                       muted
                       playsInline

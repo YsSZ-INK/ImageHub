@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useCursorPager } from "@/lib/use-cursor-pager";
-import { formatBytes, thumbSrcSet, GRID_SIZES, EAGER_COUNT } from "@/lib/utils";
+import { formatBytes, thumbSrcSet, GRID_SIZES, EAGER_COUNT, videoCoverSrc } from "@/lib/utils";
 import { markerLabel, markerBadgeClass } from "@/lib/markers";
 import type { ImageDTO } from "@/server/image.service";
 
@@ -280,7 +280,7 @@ export function MyImagesClient({ albums, storages }: { albums: { id: string; nam
                 <div className="relative">
                 {img.kind === "video" ? (
                   <video
-                    src={img.rawUrl}
+                    src={videoCoverSrc(img.rawUrl)}
                     preload="metadata"
                     muted
                     playsInline

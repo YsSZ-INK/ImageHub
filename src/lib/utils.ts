@@ -65,3 +65,9 @@ export const MASONRY_SIZES = "(min-width: 1536px) 19vw, (min-width: 1024px) 24vw
 
 // 首屏前几张不懒加载，避免「缩略图先等着」的观感；其余继续 lazy
 export const EAGER_COUNT = 8;
+
+// 视频卡片封面：手机（尤其 iOS Safari）不会为 preload="metadata" 的视频绘制首帧，
+// 加媒体片段 #t=0.5 让浏览器定位到第 0.5 秒并渲染该帧，充当封面
+export function videoCoverSrc(url: string) {
+  return url.includes("#") ? url : `${url}#t=0.5`;
+}
