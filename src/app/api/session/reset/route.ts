@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { publicUrl } from "@/lib/api";
 
 export const runtime = "nodejs";
 
@@ -12,7 +13,9 @@ const NAMES = [
 ];
 
 export async function GET(req: Request) {
-  const res = NextResponse.redirect(new URL("/", req.url));
+  // 不能用 new URL("/", req.url)：容器里的 req.url 可能是 http://0.0.0.0:3000，
+  // 手机会被跳到这个内网地址（表现为「打开就是 0.0.0.0:3000」）
+  const res = NextResponse.redirect(publicUrl(req, "/"));
   for (const name of NAMES) {
     res.cookies.set(name, "", { path: "/", maxAge: 0 });
     // 大 token 会被拆成 .0 / .1 … 分片，一并清掉

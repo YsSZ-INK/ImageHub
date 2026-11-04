@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handle, AppError } from "@/lib/api";
+import { handle, AppError, publicUrl } from "@/lib/api";
 import { getCurrentUser } from "@/lib/session";
 import { getImageForView, getImageForPublicView, type PublicImageSnapshot } from "@/server/image.service";
 import { getStorageFor } from "@/lib/storage";
@@ -23,11 +23,11 @@ export const GET = handle(async (req: Request, { params }: { params: Promise<{ i
   if (!viewer) img = await getImageForPublicView(id);
   if (!img) img = await getImageForView(id, viewer);
   if (img.mimeType.startsWith("video/")) {
-    return NextResponse.redirect(new URL(`/api/images/${id}/raw`, req.url), 307);
+    return NextResponse.redirect(publicUrl(req, `/api/images/${id}/raw`), 307);
   }
   // GIF 动图：sharp 转码会丢帧，直接回原图（浏览器按需缩放），保持原本的动效与正确的 Content-Type
   if (img.mimeType === "image/gif") {
-    return NextResponse.redirect(new URL(`/api/images/${id}/raw`, req.url), 307);
+    return NextResponse.redirect(publicUrl(req, `/api/images/${id}/raw`), 307);
   }
 
   // 宽度白名单：不在列表里一律按 400（历史默认），避免任意尺寸把缓存打爆

@@ -17,7 +17,8 @@ export const getCurrentUser = cache(async (): Promise<User | null> => {
   if (!user || user.status === "BANNED") return null;
   // 会话吊销：JWT 签发时快照 tokenVersion，与库中当前值不一致（密码已变更或被管理员重置）
   // 则旧会话立即失效，需重新登录。缺省视为 0，与 schema 默认值一致。
-  if (session.user.tokenVersion !== user.tokenVersion) return null;
+  // 说明：早期版本签发的令牌里没有这个字段（undefined），按 0 处理，避免升级后被集体踢下线。
+  if ((session.user.tokenVersion ?? 0) !== user.tokenVersion) return null;
   return user;
 });
 

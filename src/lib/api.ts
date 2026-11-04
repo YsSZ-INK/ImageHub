@@ -37,6 +37,19 @@ export function handle<A extends unknown[]>(
   };
 }
 
+/**
+ * 反向代理后的对外地址。
+ * 容器内的 req.url 可能指向内部绑定地址（如 http://0.0.0.0:3000），直接拿它做重定向
+ * 会把用户跳到内网/无效地址。优先用代理传来的 X-Forwarded-*，其次 Host。
+ */
+export function publicUrl(req: Request, path = "/"): URL {
+  const first = (v: string | null) => v?.split(",")[0]?.trim() || undefined;
+  const base = new URL(req.url);
+  const host = first(req.headers.get("x-forwarded-host")) ?? req.headers.get("host") ?? base.host;
+  const proto = first(req.headers.get("x-forwarded-proto")) ?? base.protocol.replace(":", "");
+  return new URL(path, `${proto}://${host}`);
+}
+
 // 变更类请求的简单 Origin 校验（CSRF 加固，配合 SameSite=Lax Cookie）
 export function assertSameOrigin(req: Request) {
   const origin = req.headers.get("origin");
