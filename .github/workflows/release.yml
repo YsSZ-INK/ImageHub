@@ -58,8 +58,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
-          IMAGE: ghcr.io/${{ github.repository }}
         run: |
+          # GHCR 镜像名必须全小写，而仓库名可能含大写（YsSZ-INK/ImageHub）
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
           gh release create "$TAG" \
             --title "$TAG" \
             --verify-tag \
