@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -48,6 +48,28 @@ export function Lightbox({
     setHdLoaded(false);
     setHdRetry(0);
   }, [img?.rawUrl]);
+
+  // 手机返回键：打开灯箱时压一条历史记录，按返回先关闭灯箱，而不是直接离开页面/回到登录页。
+  // onClose 用 ref 持有，避免父组件每次渲染传新函数导致重复 pushState。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    const openedAt = window.location.href;
+    const poppedByBack = { current: false };
+    window.history.pushState({ ...(window.history.state ?? {}), ihLightbox: true }, "");
+    function onPop() {
+      poppedByBack.current = true;
+      onCloseRef.current();
+    }
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      // 点关闭按钮时把我们压入的记录退掉；若用户是按返回关闭、或页面已跳转，则不再动历史
+      const stillHere = window.location.href === openedAt;
+      const ours = (window.history.state as { ihLightbox?: boolean } | null)?.ihLightbox;
+      if (!poppedByBack.current && stillHere && ours) window.history.back();
+    };
+  }, []);
 
   // 相邻原图预取：显示当前图的同时后台加载前后各一张，翻页即显高清。
   // 仅在鼠标悬停设备上做——触屏设备打开灯箱就顺带下两张原图，弱网下反而拖慢当前图。

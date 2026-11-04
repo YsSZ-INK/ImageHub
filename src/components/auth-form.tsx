@@ -41,13 +41,25 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
   }
 
   // 兼容修复前已经登录、历史里仍留着登录页的用户：
-  // 从 bfcache 恢复（persisted=true）时，凭当前会话直接跳进控制台，不再显示登录表单
+  // 1) bfcache 恢复（persisted=true）时立即跳走；
+  // 2) 其它任何方式重新显示登录页（浏览器本地缓存、历史回退的整页加载等）也兜底查一次会话，
+  //    已登录就跳回控制台——否则手机按返回键会看到登录表单，像是被踢下线了。
   useEffect(() => {
+    let alive = true;
     function onPageShow(e: PageTransitionEvent) {
       if (e.persisted) window.location.replace(callbackUrl);
     }
     window.addEventListener("pageshow", onPageShow);
-    return () => window.removeEventListener("pageshow", onPageShow);
+    fetch("/api/auth/session", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s: { user?: unknown } | null) => {
+        if (alive && s?.user) window.location.replace(callbackUrl);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+      window.removeEventListener("pageshow", onPageShow);
+    };
   }, [callbackUrl]);
 
   async function doLogin(e: React.FormEvent) {
