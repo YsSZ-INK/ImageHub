@@ -1103,9 +1103,8 @@ export function AdminSettingsClient() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="redis-url">Redis 连接地址</Label>
-            <Input
+            <PasswordInput
               id="redis-url"
-              type="password"
               autoComplete="off"
               placeholder={
                 form.hasRedisUrl
