@@ -38,13 +38,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       credentials: {
         email: { label: "邮箱" },
         password: { label: "密码" },
-        remember: { label: "记住我" },
       },
       async authorize(credentials, request) {
-        const { email, password, remember } = (credentials ?? {}) as {
+        const { email, password } = (credentials ?? {}) as {
           email?: string;
           password?: string;
-          remember?: boolean | string;
         };
         if (!email || !password) return null;
         // 三层桶语义独立、互不依赖：并发执行，避免跨地域 Redis 下 3 × RTT 串行叠加
@@ -75,7 +73,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           role: user.role,
           // 随令牌快照会话吊销版本号：改密后 tokenVersion 变更，旧 JWT 自动失效（见 auth.config.ts / session.ts）
           tokenVersion: user.tokenVersion,
-          remember: remember === true || remember === "true",
         };
       },
     }),

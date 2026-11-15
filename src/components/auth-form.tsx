@@ -23,7 +23,7 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
       ? rawCallback
       : "/gallery";
 
-  const [loginData, setLoginData] = useState({ email: "", password: "", remember: false });
+  const [loginData, setLoginData] = useState({ email: "", password: "" });
   const [regData, setRegData] = useState({ email: "", name: "", password: "" });
   const [loading, setLoading] = useState(false);
 
@@ -69,7 +69,6 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
       const res = await signIn("credentials", {
         email: loginData.email,
         password: loginData.password,
-        remember: String(loginData.remember),
         redirect: false,
       });
       if (res?.error) {
@@ -118,7 +117,6 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
       const login = await signIn("credentials", {
         email: regData.email,
         password: regData.password,
-        remember: "false",
         redirect: false,
       });
       if (!login?.error) {
@@ -166,16 +164,7 @@ export function AuthForm({ allowRegister }: { allowRegister: boolean }) {
               placeholder="请输入密码"
             />
           </div>
-          <div className="flex items-center justify-between text-sm">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                className="accent-current"
-                checked={loginData.remember}
-                onChange={(e) => setLoginData({ ...loginData, remember: e.target.checked })}
-              />
-              记住我
-            </label>
+          <div className="flex items-center justify-end text-sm">
             <Link href="/forgot-password" className="text-muted-foreground hover:underline">
               忘记密码？
             </Link>

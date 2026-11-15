@@ -11,7 +11,6 @@ declare module "next-auth" {
   }
   interface User {
     role?: string;
-    remember?: boolean;
     tokenVersion?: number;
   }
 }
