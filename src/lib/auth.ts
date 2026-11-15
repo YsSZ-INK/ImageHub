@@ -47,20 +47,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           remember?: boolean | string;
         };
         if (!email || !password) return null;
-        // ① 全局桶：整站 300 次/分钟，超过即判定为爆破行为
-        if (!(await rateLimit("login:global", LOGIN_GLOBAL_MAX, LOGIN_WINDOW_MS)).success) {
-          throw new LoginBlockedError("rate_limited");
-        }
+        // 三层桶语义独立、互不依赖：并发执行，避免跨地域 Redis 下 3 × RTT 串行叠加
+        // ① 全局桶（恒启用）：整站 300 次/分钟，兜底分布式爆破
         // ② IP 桶：仅反代部署（TRUST_PROXY=1）启用——直连时该头由客户端随意伪造，按它计数无意义
-        if (TRUST_PROXY && request) {
-          const ip = clientIp(request as Request);
-          if (!(await rateLimit(`login:ip:${ip}`, LOGIN_IP_MAX, LOGIN_WINDOW_MS)).success) {
-            throw new LoginBlockedError("rate_limited");
-          }
-        }
         // ③ 邮箱桶：单账号 10 次/分钟
-        const rl = await rateLimit(`login:${email.toLowerCase()}`, LOGIN_MAX, LOGIN_WINDOW_MS);
-        if (!rl.success) throw new LoginBlockedError("rate_limited");
+        const ipKey =
+          TRUST_PROXY && request ? `login:ip:${clientIp(request as Request)}` : null;
+        const checks = [
+          rateLimit("login:global", LOGIN_GLOBAL_MAX, LOGIN_WINDOW_MS),
+          rateLimit(`login:${email.toLowerCase()}`, LOGIN_MAX, LOGIN_WINDOW_MS),
+        ];
+        if (ipKey) checks.push(rateLimit(ipKey, LOGIN_IP_MAX, LOGIN_WINDOW_MS));
+        const results = await Promise.all(checks);
+        if (results.some((r) => !r.success)) throw new LoginBlockedError("rate_limited");
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user) return null;
         if (user.status === "BANNED") {

@@ -21,6 +21,15 @@ export const PUT = handle(async (req: Request) => {
   if (input.smtpPass === "") input.smtpPass = current.smtpPass;
   // Redis 地址留空表示保持已存值不变（加密落库、不下发浏览器）
   if (input.redisUrl === "") input.redisUrl = current.redisUrl;
+  // 公开域名：不传保持原值；非空必须是带主机名的 http(s) 地址，落库前去掉末尾斜杠
+  if (input.r2PublicBase === undefined) {
+    input.r2PublicBase = current.r2PublicBase;
+  } else if (input.r2PublicBase) {
+    if (!/^https?:\/\/[^/\s]+/i.test(input.r2PublicBase)) {
+      throw new AppError("公开访问域名需以 http:// 或 https:// 开头，且包含主机名", 400);
+    }
+    input.r2PublicBase = input.r2PublicBase.replace(/\/+$/, "");
+  }
   input.r2Slots = input.r2Slots.map((slot) => {
     if (slot.secretAccessKey) return slot;
     // 留空：按 (accountId, accessKeyId, bucket) 匹配已存槽位继承 Secret；匹配不到则视为未配置

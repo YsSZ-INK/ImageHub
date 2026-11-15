@@ -61,8 +61,9 @@ export const GET = handle(async (req: Request, { params }: { params: Promise<{ i
   return new NextResponse(new Uint8Array(buf), {
     headers: {
       "Content-Type": fmt === "avif" ? "image/avif" : "image/webp",
-      // 一级缓存 1 天 + 一周的 stale-while-revalidate：重复访问直接命中，过期后后台刷新
-      "Cache-Control": `${viewer ? "private" : "public"}, max-age=86400, stale-while-revalidate=604800`,
+      // URL 带 ?v=版本号（旋转等原位重写后自增），内容变化 URL 必变，可安全长缓存：
+      // 匿名请求一年 immutable；登录用户保留 1 天（避免自己删图后本地长期留旧图）
+      "Cache-Control": viewer ? "private, max-age=86400" : "public, max-age=31536000, immutable",
       ETag: etag,
       // 同一 URL 会按 Accept 返回 avif/webp，必须声明，否则共享缓存会把格式串错
       Vary: "Accept",

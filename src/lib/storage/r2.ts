@@ -159,6 +159,36 @@ export async function testR2Connection(cfg: S3CompatibleConfig): Promise<void> {
   await r2.delete(key);
 }
 
+// 延迟探测专用客户端缓存：复用长连接，测的是稳定态往返（不含每次新建 TLS 握手）
+const latencyClients = new Map<string, S3Client>();
+
+function latencyClient(cfg: S3CompatibleConfig): S3Client {
+  const key = `${cfg.endpoint ?? ""}|${cfg.accountId}:${cfg.accessKeyId}:${cfg.bucket}`;
+  let c = latencyClients.get(key);
+  if (!c) {
+    c = makeS3Client(cfg);
+    latencyClients.set(key, c);
+  }
+  return c;
+}
+
+/**
+ * 实测一次对象读路径往返耗时（毫秒）。
+ * HEAD 一个固定的不存在键：对象不存在（404）也已完成一次真实往返，忽略该错误即可；
+ * 鉴权失败同样说明网络往返正常，一并忽略。只在后台设置页读取延迟时调用。
+ */
+export async function measureR2Latency(cfg: S3CompatibleConfig): Promise<number> {
+  const client = latencyClient(cfg);
+  const t0 = performance.now();
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: cfg.bucket, Key: "__imagehub_latency_probe__" }));
+  } catch (err) {
+    const name = (err as { name?: string }).name ?? "";
+    if (!/NotFound|NoSuchKey|404|AccessDenied|Forbidden/i.test(name)) throw err;
+  }
+  return Math.max(0, Math.round(performance.now() - t0));
+}
+
 // 桶实时用量：S3 兼容 API 无直接容量查询，只能 ListObjectsV2 逐页累加对象大小
 export async function getR2Usage(cfg: S3CompatibleConfig): Promise<{ bytes: number; objects: number }> {
   const client = makeS3Client(cfg);

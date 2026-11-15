@@ -1,6 +1,6 @@
 import { handle, assertSameOrigin, ok, AppError } from "@/lib/api";
 import { requireApiSuper } from "@/lib/session";
-import { testR2Connection } from "@/lib/storage/r2";
+import { testR2Connection, measureR2Latency } from "@/lib/storage/r2";
 import { getSettings } from "@/lib/settings";
 import { z } from "zod";
 
@@ -55,5 +55,19 @@ export const POST = handle(async (req: Request) => {
               : "连接失败";
     throw new AppError(`存储桶 ${hint}（${name || "Error"}）`, 400);
   }
-  return ok({ message: "连接成功：端点、密钥与读写权限均正常" });
+  // 连接可用后顺带测一次读路径往返，前端可直接把延迟显示在该桶卡片上
+  let latencyMs: number | null = null;
+  try {
+    latencyMs = await measureR2Latency({
+      accountId: input.accountId,
+      accessKeyId: input.accessKeyId,
+      secretAccessKey: secret,
+      bucket: input.bucket,
+      endpoint: input.endpoint || undefined,
+      region: input.region || undefined,
+    });
+  } catch {
+    // 延迟测不出来不影响连接结论
+  }
+  return ok({ message: "连接成功：端点、密钥与读写权限均正常", latencyMs });
 });

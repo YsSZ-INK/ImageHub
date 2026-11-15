@@ -58,6 +58,9 @@ export type SiteSettings = {
   redisEnabled: boolean;
   // 只读标记：服务端已存有 Redis 地址（本体永不下发浏览器）
   hasRedisUrl?: boolean;
+  // 对象存储公开访问域名（可选）：配置后匿名访问 PUBLIC 图片原图时 302 到该域名，
+  // 图片字节不再经本站中转；留空保持全部经本站代理
+  r2PublicBase: string;
 };
 
 const EMPTY_SLOT: R2SlotConfig = { accountId: "", accessKeyId: "", secretAccessKey: "", bucket: "" };
@@ -79,6 +82,7 @@ const DEFAULTS: SiteSettings = {
   redisMode: "failover",
   redisUrl: "",
   redisEnabled: false,
+  r2PublicBase: "",
 };
 
 let cache: { value: SiteSettings; expiresAt: number } | null = null;
@@ -165,6 +169,7 @@ export async function getSettings(): Promise<SiteSettings> {
       redisMode: map.get("redisMode") === "balance" ? "balance" : "failover",
       redisUrl: redisSlots[0]?.url ?? "",
       redisEnabled: map.get("redisEnabled") === "true",
+      r2PublicBase: (map.get("r2PublicBase") ?? "").trim().replace(/\/+$/, ""),
     };
     cache = { value, expiresAt: Date.now() + 60_000 };
     return value;

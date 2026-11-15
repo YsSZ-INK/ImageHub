@@ -231,6 +231,8 @@ export function AdminSettingsClient() {
   const [testing, setTesting] = useState(false);
   // R2 连接测试
   const [r2Testing, setR2Testing] = useState(false);
+  // 各存储桶读路径探测延迟（毫秒，key 为槽位下标）：null 表示未测/不可用
+  const [r2Latency, setR2Latency] = useState<Record<number, number | null>>({});
   // R2 记录一致性校验/清理（孤儿记录：数据库有记录、桶里没文件）
   const [rc, setRc] = useState<{
     running: boolean;
@@ -280,6 +282,8 @@ export function AdminSettingsClient() {
         setForm(json.data);
         setMaxMbInput(String(json.data.maxUploadMB));
         setPortInput(json.data.smtpPort ? String(json.data.smtpPort) : "");
+        // 已配置的对象存储桶顺带测一次往返延迟（失败静默，不影响设置页）
+        if (json.data.r2Slots?.length) void refreshR2Latency();
       });
   }, []);
 
@@ -331,6 +335,8 @@ export function AdminSettingsClient() {
         router.refresh();
         // 邮件状态随保存重新探测（新配置立即生效可见，无需手动点检测）
         refreshMail();
+        // 桶配置可能刚变更，重新探测各桶延迟
+        if (form.r2Slots.length) void refreshR2Latency();
       } else toast.error(json.error);
     } finally {
       setSaving(false);
@@ -456,6 +462,21 @@ export function AdminSettingsClient() {
     setForm({ ...form, redisSlots: next });
   }
 
+  // 各存储桶的读路径延迟：打开设置页 / 保存配置后探测一次，展示在桶卡片上
+  async function refreshR2Latency() {
+    try {
+      const json = await fetch("/api/admin/storage/latency").then((r) => r.json());
+      if (!json.ok) return;
+      const map: Record<number, number | null> = {};
+      for (const s of json.data.slots as { index: number; latencyMs: number | null }[]) {
+        map[s.index] = s.latencyMs;
+      }
+      setR2Latency(map);
+    } catch {
+      // 延迟只是辅助信息，探测失败不提示
+    }
+  }
+
   // R2 连接测试：用某个桶的当前表单配置真实读写一个探测对象
   // 密钥留空（已保存在服务端）时带 slotIndex，让接口回退用已存的 Secret
   async function testR2(cfg: R2SlotConfig, slotIndex?: number) {
@@ -473,8 +494,14 @@ export function AdminSettingsClient() {
         body: JSON.stringify(cfg.secretAccessKey ? cfg : { ...cfg, slotIndex }),
       });
       const json = await res.json();
-      if (json.ok) toast.success(json.data.message);
-      else toast.error(json.error);
+      if (json.ok) {
+        toast.success(json.data.message);
+        // 连接成功顺带拿到了往返延迟，直接更新该桶徽标
+        if (slotIndex != null && json.data.latencyMs != null) {
+          const ms = json.data.latencyMs as number;
+          setR2Latency((m) => ({ ...m, [slotIndex]: ms }));
+        }
+      } else toast.error(json.error);
     } catch {
       toast.error("连接请求失败，请检查网络");
     } finally {
@@ -800,6 +827,8 @@ export function AdminSettingsClient() {
   const r2Block = (i: number) => {
     const s = form.r2Slots[i];
     const type = s.type ?? "r2";
+    // 该桶最近一次探测的读路径往返（毫秒）：null 表示未测/不可用
+    const latMs = r2Latency[i];
     const typeName = SLOT_TYPES.find((t) => t.type === type)?.name ?? "Cloudflare R2";
     const secretPlaceholder = s.hasSecret
       ? "已保存（留空保持不变）"
@@ -992,10 +1021,18 @@ export function AdminSettingsClient() {
             onChange={(e) => updSlot(i, { label: e.target.value })}
           />
         </div>
-        <div className="flex items-end gap-3">
+        <div className="flex flex-wrap items-end gap-3">
           <Button variant="outline" onClick={() => testR2(s, i)} disabled={r2Testing}>
             {r2Testing ? <Loader2 className="animate-spin" /> : null} 测试连接
           </Button>
+          {latMs != null && (
+            <span
+              className={`pb-2 text-xs tabular-nums ${latMs > 200 ? "text-amber-600" : "text-muted-foreground"}`}
+              title="对象读路径往返耗时：每次图片回源都要多付这个时间；跨地域部署时建议把桶换到离站点更近的区域，或配置公开域名让图片直连"
+            >
+              延迟 {fmtLatency(latMs)}
+            </span>
+          )}
           <span className="pb-2 text-xs text-muted-foreground">
             {type === "r2" && "在 Cloudflare → R2 → 管理 R2 API 令牌创建「对象读和写」令牌"}
             {type === "oss" && "需开通 OSS 并创建 AccessKey；端点按 Region 自动生成"}
@@ -1372,6 +1409,23 @@ export function AdminSettingsClient() {
               <option value="r2">对象存储（R2 / OSS / COS / MinIO…，不占用服务器空间）</option>
             </Select>
           </div>
+
+          {/* 公开访问域名：配置后匿名公开图的原始文件直接由对象存储/CDN 提供，图片字节不再经本站中转 */}
+          {form.storageDriver === "r2" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="r2-public-base">公开访问域名（可选）</Label>
+              <Input
+                id="r2-public-base"
+                placeholder="https://img.example.com"
+                value={form.r2PublicBase}
+                onChange={(e) => setForm({ ...form, r2PublicBase: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">
+                填写后，匿名访问公开图片的原图会 302 到该域名（需先给桶绑定自定义域并允许公开读取），图片流量不再经过本站。
+                仅对 PUBLIC 图片生效：私有/友链图仍走受保护接口，缩略图与登录用户不受影响；留空保持全部经本站代理。
+              </p>
+            </div>
+          )}
 
           {/* 添加按钮在桶配置块上方：先选存储类型，再按类型填写表单 */}
           <div className="flex flex-wrap items-center gap-2">

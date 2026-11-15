@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/session";
 import { getImageForView, getImageForPublicView, type PublicImageSnapshot } from "@/server/image.service";
 import { getStorageFor } from "@/lib/storage";
 import { getRawCached, RAW_CACHE_MAX_FILE } from "@/lib/raw-cache";
+import { getSettings } from "@/lib/settings";
 
 export const runtime = "nodejs";
 
@@ -21,6 +22,26 @@ async function serveFile(req: Request, id: string, download = false) {
   let img: PublicImageSnapshot | null = null;
   if (!viewer) img = await getImageForPublicView(id);
   if (!img) img = await getImageForView(id, viewer);
+
+  // 公开图原图直连对象存储：图片字节不再经本站中转。
+  // 仅匿名 + 非下载生效——私有/友链图必须经过鉴权，跳转等于绕过；download=1 需本站附带原始文件名。
+  if (!viewer && !download && img.storage.startsWith("r2")) {
+    const base = (await getSettings()).r2PublicBase;
+    if (base) {
+      // 对象键逐段编码：中文 / 空格 / # 等字符原样拼进 URL 会被截断或解析错
+      const keyPath = img.storageKey.split("/").map(encodeURIComponent).join("/");
+      return new NextResponse(null, {
+        status: 302,
+        headers: {
+          // 带 ?v= 版本号：旋转等原位重写后 URL 必变，避免 CDN 命中旧图
+          Location: `${base}/${keyPath}?v=${img.version}`,
+          // 302 只让浏览器短暂记住，改回代理后能较快生效
+          "Cache-Control": "public, max-age=300",
+        },
+      });
+    }
+  }
+
   // 按记录的实际存放位置取文件（local / r2）
   const storage = await getStorageFor(img.storage);
   const key = img.storageKey;

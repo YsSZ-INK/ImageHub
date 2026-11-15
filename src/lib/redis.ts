@@ -112,6 +112,11 @@ function createClient(url: string): Redis {
     maxRetriesPerRequest: 1,
     enableOfflineQueue: false,
     retryStrategy: () => null,
+    // 同一 tick 内的多条命令合并成一次往返（登录三层限流等场景直接省掉 N-1 个 RTT）。
+    // 仅对单机/哨兵有效：本项目的多地址是独立实例分别建连，不涉及 Cluster，可安全开启。
+    enableAutoPipelining: true,
+    // 连接假死（半开 TCP）时不让请求无限挂住，超时后走内存降级
+    commandTimeout: 2000,
   });
   c.on("error", () => {}); // 必须吞掉 error 事件，否则未捕获异常刷屏
   return c;

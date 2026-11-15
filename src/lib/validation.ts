@@ -114,6 +114,8 @@ export const adminSettingsSchema = z.object({
   redisUrl: z.string().max(255).trim(),
   // Redis 启用开关：false 时不连 Redis（限流走进程内存）
   redisEnabled: z.boolean(),
+  // 对象存储公开访问域名（可选）：留空/不传保持原值
+  r2PublicBase: z.string().max(255).trim().optional(),
 });
 
 export const resetPasswordSchema = z.object({

@@ -6,11 +6,16 @@ import { getRedis, getRedisNodes } from "@/lib/redis";
  * - Redis 未配置或故障：降级进程内存 Map（带 TTL，条目数上限防膨胀）
  * - loader 返回 undefined 表示「结果不适合缓存」（如非公开图片），调用方每次实时计算
  * - 变更入口用 invalidateJson 主动失效，配合短 TTL 双保险
+ * - 读路径三级：进程内 L1 → Redis → loader；L1 默认 5 秒，跨地域部署时命中即 0 次网络往返
  */
 
 type MemEntry = { value: string; expiresAt: number };
 const MEM_LIMIT = 1000;
 const mem = new Map<string, MemEntry>();
+
+// L1 进程内缓存时长：跨地域 Redis 下把热 key 的读压到 0 次网络往返；
+// 不宜过长（>30s），多实例部署时只失效当前进程，会导致变更可见性延迟。
+const L1_TTL_MS = Math.max(0, Number(process.env.CACHE_L1_TTL_MS ?? 5000));
 
 function memGet(key: string): string | undefined {
   const e = mem.get(key);
@@ -37,6 +42,16 @@ function memSet(key: string, value: string, ttlMs: number) {
 
 // 读缓存：命中返回反序列化结果；未命中跑 loader 并写缓存（loader 返回 undefined 则跳过缓存）
 export async function cachedJson<T>(key: string, ttlMs: number, loader: () => Promise<T | undefined>): Promise<T | undefined> {
+  // 1) L1 命中直接返回（0 次网络）
+  const l1 = L1_TTL_MS > 0 ? memGet(key) : undefined;
+  if (l1 !== undefined) {
+    try {
+      return JSON.parse(l1) as T;
+    } catch {
+      // 缓存内容损坏视为未命中
+    }
+  }
+
   let raw: string | undefined;
   // 带 key 取客户端：同时读写模式下要读自己写的那台，否则缓存命中率会被节点数摊薄
   const r = await getRedis(key);
@@ -47,10 +62,13 @@ export async function cachedJson<T>(key: string, ttlMs: number, loader: () => Pr
       raw = undefined; // Redis 异常时降级内存
     }
   }
-  if (raw === undefined) raw = memGet(key);
+  if (raw === undefined && L1_TTL_MS > 0) raw = memGet(key);
   if (raw !== undefined) {
     try {
-      return JSON.parse(raw) as T;
+      const parsed = JSON.parse(raw) as T;
+      // 回填 L1：下次命中不再走 Redis
+      if (L1_TTL_MS > 0) memSet(key, raw, Math.min(ttlMs, L1_TTL_MS));
+      return parsed;
     } catch {
       // 缓存内容损坏视为未命中
     }
@@ -66,7 +84,8 @@ export async function cachedJson<T>(key: string, ttlMs: number, loader: () => Pr
       // 写失败不致命（内存兜底 + 下次重试）
     }
   }
-  memSet(key, payload, ttlMs);
+  // Redis 可用时 L1 只做短暂热缓存；Redis 不可用时内存承担完整 TTL
+  memSet(key, payload, r && L1_TTL_MS > 0 ? Math.min(ttlMs, L1_TTL_MS) : ttlMs);
   return value;
 }
 

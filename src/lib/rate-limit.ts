@@ -2,12 +2,24 @@ import { getRedis } from "@/lib/redis";
 
 /**
  * 限流：固定窗口计数。
- * - 站点设置/环境变量配置了 Redis 时用 Redis INCR+PEXPIRE（多实例共享、重启不清零）
+ * - 站点设置/环境变量配置了 Redis 时用 Redis（Lua 原子完成 INCR+PEXPIRE+PTTL，一次往返）
  * - 未配置或 Redis 故障时自动降级为进程内存实现（单实例适用，重启清零）
  */
 type Counter = { count: number; resetAt: number };
 
 const memory = new Map<string, Counter>();
+
+// 计数 + 过期 + 读剩余 TTL 合成一次 EVAL：TTL 依赖 INCR 结果，必须原子，
+// 跨地域 Redis 下单条命令就是 1 个 RTT，拆成三条会放大成 2~3 个 RTT。
+const LIMIT_LUA = `
+local n = redis.call('INCR', KEYS[1])
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl < 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+  ttl = tonumber(ARGV[1])
+end
+return {n, ttl}
+`;
 
 export async function rateLimit(
   key: string,
@@ -19,15 +31,10 @@ export async function rateLimit(
   const r = await getRedis(k);
   if (r) {
     try {
-      const n = await r.incr(k);
-      if (n === 1) await r.pexpire(k, windowMs);
-      let ttl = await r.pttl(k);
-      if (ttl < 0) {
-        // 键无过期（如 Redis 重启前残留）：补上过期时间
-        await r.pexpire(k, windowMs);
-        ttl = windowMs;
-      }
-      return { success: n <= limit, retryAfter: Math.ceil(ttl / 1000) };
+      const res = (await r.eval(LIMIT_LUA, 1, k, String(windowMs))) as [number, number];
+      const n = Number(res?.[0] ?? 0);
+      const ttl = Number(res?.[1] ?? windowMs);
+      return { success: n <= limit, retryAfter: Math.ceil(Math.max(ttl, 0) / 1000) };
     } catch {
       // Redis 异常：降级到内存限流
     }
