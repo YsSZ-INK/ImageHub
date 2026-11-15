@@ -16,7 +16,12 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const themeScript = `(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark')}}catch(e){}})()`;
+// 首屏前置脚本：恢复深色偏好；控制台额外恢复「云蓝」皮肤（登录/找回/验证页不套用）
+const themeScript = `(function(){try{
+var t=localStorage.getItem('theme');
+if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark')}
+if(localStorage.getItem('console-skin')==='azure'&&!/^\\/(?:forgot-password|reset-password|verify-email)?\\/?$/.test(location.pathname)){document.documentElement.classList.add('skin-azure')}
+}catch(e){}})()`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

@@ -6,6 +6,7 @@ import { signOut } from "next-auth/react";
 import { Images, Menu, LogOut, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { SkinSwitcher } from "@/components/skin-switcher";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -67,6 +68,7 @@ export function ConsoleTopBar({ siteName, user, navGroups }: Props) {
           {title}
         </span>
         <div className="flex items-center gap-1">
+          <SkinSwitcher />
           <ThemeToggle />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
