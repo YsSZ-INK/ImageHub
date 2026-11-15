@@ -53,10 +53,25 @@ export function Lightbox({
   // onClose 用 ref 持有，避免父组件每次渲染传新函数导致重复 pushState。
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // 只压一条历史记录（StrictMode 下 effect 会双跑）
+  const pushedRef = useRef(false);
+  // 本条历史记录的唯一标识：关闭后快速重开时，旧实例的延迟回退不会误退掉新实例的记录
+  const historyIdRef = useRef(`${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  // 关闭时回退历史条目的定时器：StrictMode 的「挂载→卸载→重挂载」会先走到清理，
+  // 立即 history.back() 触发的 popstate 会把刚打开的灯箱自己关掉（表现为点开闪一下就消失），
+  // 因此延后一拍执行，重挂载时取消。
+  const backTimerRef = useRef<number | null>(null);
   useEffect(() => {
     const openedAt = window.location.href;
     const poppedByBack = { current: false };
-    window.history.pushState({ ...(window.history.state ?? {}), ihLightbox: true }, "");
+    if (backTimerRef.current !== null) {
+      window.clearTimeout(backTimerRef.current);
+      backTimerRef.current = null;
+    }
+    if (!pushedRef.current) {
+      window.history.pushState({ ...(window.history.state ?? {}), ihLightbox: true, ihId: historyIdRef.current }, "");
+      pushedRef.current = true;
+    }
     function onPop() {
       poppedByBack.current = true;
       onCloseRef.current();
@@ -64,10 +79,16 @@ export function Lightbox({
     window.addEventListener("popstate", onPop);
     return () => {
       window.removeEventListener("popstate", onPop);
-      // 点关闭按钮时把我们压入的记录退掉；若用户是按返回关闭、或页面已跳转，则不再动历史
-      const stillHere = window.location.href === openedAt;
-      const ours = (window.history.state as { ihLightbox?: boolean } | null)?.ihLightbox;
-      if (!poppedByBack.current && stillHere && ours) window.history.back();
+      // 用户按返回关闭时已经被弹出，无需再动历史
+      if (poppedByBack.current) return;
+      backTimerRef.current = window.setTimeout(() => {
+        backTimerRef.current = null;
+        // 期间已重新挂载（上面的取消逻辑会清掉定时器）；页面已跳转也不再回退
+        if (window.location.href !== openedAt) return;
+        const st = window.history.state as { ihLightbox?: boolean; ihId?: string } | null;
+        // 只退自己压入的那一条，避免误退新开灯箱的记录
+        if (st?.ihLightbox && st.ihId === historyIdRef.current) window.history.back();
+      }, 100);
     };
   }, []);
 

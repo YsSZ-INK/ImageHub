@@ -2,16 +2,18 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { FolderInput, Film, Loader2 } from "lucide-react";
+import { FolderInput, Loader2, Play, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Checkbox } from "@/components/ui/checkbox";
-import { formatBytes } from "@/lib/utils";
+import { Lightbox } from "@/components/lightbox";
+import { formatBytes, videoCoverSrc } from "@/lib/utils";
 import { markerLabel, markerBadgeClass } from "@/lib/markers";
 import type { MigrationStatus } from "@/server/migration.service";
+import type { ImageDTO } from "@/server/image.service";
 
 export type MarkerOpt = { marker: string; label: string };
 
@@ -20,7 +22,10 @@ type MItem = {
   filename: string;
   size: number;
   storage: string;
+  mimeType: string;
+  createdAt: string;
   thumbUrl: string;
+  rawUrl: string;
   kind: "image" | "video";
 };
 
@@ -29,8 +34,10 @@ const selectCls =
 
 // 存储迁移管理：选方向 → 逐张勾选（带存储徽标，看清到底迁哪些）→ 发起 → 进度
 export function MigrateClient({ markers, initialStatus }: { markers: MarkerOpt[]; initialStatus: MigrationStatus }) {
-  const [from, setFrom] = useState(markers[0]?.marker ?? "local");
-  const [to, setTo] = useState(markers[1]?.marker ?? markers[0]?.marker ?? "");
+  const firstMarker = markers[0]?.marker ?? "local";
+  const [from, setFrom] = useState(firstMarker);
+  // 目标位置默认取一个与源不同的位置；只有一个位置时为空，页面会提示先配置存储桶
+  const [to, setTo] = useState(markers.find((m) => m.marker !== firstMarker)?.marker ?? "");
   const [items, setItems] = useState<MItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -41,7 +48,29 @@ export function MigrateClient({ markers, initialStatus }: { markers: MarkerOpt[]
   const [migrateAll, setMigrateAll] = useState(false); // 勾上表示迁移该位置全部图片
   const [status, setStatus] = useState<MigrationStatus>(initialStatus);
   const [starting, setStarting] = useState(false);
+  // 灯箱预览：与「我的图片」一致，视频可直接播放、图片可放大查看
+  const [preview, setPreview] = useState<number | null>(null);
   const fromRef = useRef(from);
+
+  // 迁移列表条目转为灯箱所需的图片结构（迁移页不展示审核/可见性，这里给默认值）
+  const previewItems: ImageDTO[] = items.map((i) => ({
+    id: i.id,
+    filename: i.filename,
+    width: 0,
+    height: 0,
+    size: i.size,
+    mimeType: i.mimeType,
+    kind: i.kind,
+    visibility: "PUBLIC",
+    status: "PUBLISHED",
+    createdAt: new Date(i.createdAt),
+    blurhash: null,
+    albumId: null,
+    storage: i.storage,
+    version: 0,
+    thumbUrl: `${i.thumbUrl}?v=0`,
+    rawUrl: `${i.rawUrl}?v=0`,
+  }));
 
   const fromLabel = markerLabel(from);
   const toLabel = markerLabel(to);
@@ -62,11 +91,11 @@ export function MigrateClient({ markers, initialStatus }: { markers: MarkerOpt[]
     }
   }, []);
 
-  // 源位置 / 页码变化 → 重新加载列表
+  // 源位置变化 → 重新加载列表（与目标位置是否相同无关，避免只有一个存储位置时一直「加载中」）
   useEffect(() => {
     fromRef.current = from;
-    if (from && to && from !== to) void load(1, from);
-  }, [from, to, load]);
+    if (from) void load(1, from);
+  }, [from, load]);
 
   // 迁移进行中每 2 秒轮询进度；结束后刷新列表
   useEffect(() => {
@@ -108,6 +137,10 @@ export function MigrateClient({ markers, initialStatus }: { markers: MarkerOpt[]
   }
 
   async function start() {
+    if (!to) {
+      toast.error("没有可用的目标存储位置，请先在站点设置中配置存储桶");
+      return;
+    }
     if (from === to) {
       toast.error("源位置与目标位置相同");
       return;
@@ -153,7 +186,14 @@ export function MigrateClient({ markers, initialStatus }: { markers: MarkerOpt[]
             <FolderInput className="h-5 w-5 text-muted-foreground" />
             <div className="flex items-center gap-2">
               <Label className="text-sm text-muted-foreground">从</Label>
-              <select className={selectCls} value={from} onChange={(e) => { setFrom(e.target.value); setChecked(new Map()); setMigrateAll(false); }}>
+              <select className={selectCls} value={from} onChange={(e) => {
+                const next = e.target.value;
+                setFrom(next);
+                // 目标与新的源相同就自动换成另一个可用位置
+                if (to === next) setTo(markers.find((m) => m.marker !== next)?.marker ?? "");
+                setChecked(new Map());
+                setMigrateAll(false);
+              }}>
                 {markers.map((m) => (
                   <option key={m.marker} value={m.marker}>{m.label}</option>
                 ))}
@@ -161,7 +201,8 @@ export function MigrateClient({ markers, initialStatus }: { markers: MarkerOpt[]
             </div>
             <div className="flex items-center gap-2">
               <Label className="text-sm text-muted-foreground">到</Label>
-              <select className={selectCls} value={to} onChange={(e) => setTo(e.target.value)}>
+              <select className={selectCls} value={to} onChange={(e) => setTo(e.target.value)} disabled={markers.length < 2}>
+                {markers.length < 2 && <option value="">暂无可迁移位置</option>}
                 {markers.map((m) => (
                   <option key={m.marker} value={m.marker}>{m.label}</option>
                 ))}
@@ -171,6 +212,11 @@ export function MigrateClient({ markers, initialStatus }: { markers: MarkerOpt[]
               该位置共 <b className="text-foreground">{total}</b> 张图片，逐张勾选要迁移的文件
             </span>
           </div>
+          {markers.length < 2 && (
+            <p className="text-xs text-amber-600">
+              当前只有一个可用存储位置，无法迁移。请先在「站点设置」中配置并保存存储桶（R2 / S3 兼容存储）后再回来操作。
+            </p>
+          )}
           <p className="text-xs text-muted-foreground">
             迁移 = 复制到目标 → 更新记录 → 删除源位置文件。本地上传只进当前默认存储；
             本地已有照片<strong>不会</strong>自动上传到存储桶，只有在这里手动迁移才会。
@@ -192,7 +238,7 @@ export function MigrateClient({ markers, initialStatus }: { markers: MarkerOpt[]
               <Checkbox checked={migrateAll} onCheckedChange={(v) => setMigrateAll(v === true)} />
               迁移该位置全部 {total} 张（不限勾选）
             </label>
-            <Button onClick={start} disabled={starting || running || from === to} className="ml-auto">
+            <Button onClick={start} disabled={starting || running || !to || from === to} className="ml-auto">
               {starting ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
               发起迁移{migrateAll ? `（全部 ${total} 张）` : checked.size > 0 ? `（已选 ${checked.size} 张）` : ""}
             </Button>
@@ -239,34 +285,70 @@ export function MigrateClient({ markers, initialStatus }: { markers: MarkerOpt[]
           ) : (
             <>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                {items.map((img) => {
+                {items.map((img, idx) => {
                   const isChecked = checked.has(img.id);
                   return (
-                    <label
+                    <div
                       key={img.id}
-                      className={`group relative cursor-pointer overflow-hidden rounded-lg border transition-colors ${
+                      className={`group relative overflow-hidden rounded-lg border transition-colors ${
                         isChecked ? "border-primary ring-2 ring-primary/30" : "border-foreground/10 hover:border-foreground/25"
                       }`}
                     >
-                      <div className="relative flex h-28 items-center justify-center bg-muted/40">
+                      {/* 点击封面直接查看/播放；勾选只用下方复选框，避免点图变成选中而不是查看 */}
+                      <div
+                        className="relative h-28 cursor-pointer bg-muted/40"
+                        onClick={() => setPreview(idx)}
+                      >
                         {img.kind === "video" ? (
-                          <Film className="h-8 w-8 text-muted-foreground" />
+                          // 视频用原文件首帧当封面（与「我的图片」一致，手机端也能渲染）
+                          <video
+                            src={videoCoverSrc(img.rawUrl)}
+                            preload="metadata"
+                            muted
+                            playsInline
+                            className="pointer-events-none h-full w-full object-cover"
+                          />
                         ) : (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={img.thumbUrl} alt={img.filename} className="h-full w-full object-cover" loading="lazy" />
+                          <img
+                            src={img.thumbUrl}
+                            alt={img.filename}
+                            className="pointer-events-none h-full w-full object-cover"
+                            loading="lazy"
+                          />
                         )}
+                        {/* 正中按钮：视频常驻播放键，图片 hover 放大键（点击区域已覆盖整张封面） */}
+                        <span
+                          aria-hidden
+                          className={`pointer-events-none absolute inset-0 m-auto flex items-center justify-center rounded-full text-white ${
+                            img.kind === "video"
+                              ? "h-10 w-10 bg-black/50"
+                              : "h-9 w-9 bg-black/60 opacity-0 transition-opacity group-hover:opacity-100"
+                          }`}
+                        >
+                          {img.kind === "video" ? (
+                            <Play className="h-5 w-5 fill-white/90 text-white/90 drop-shadow-md" />
+                          ) : (
+                            <ZoomIn className="h-4 w-4" />
+                          )}
+                        </span>
                         <span className={`absolute left-1.5 top-1.5 rounded px-1.5 py-0.5 text-[0.6875rem] font-medium ${markerBadgeClass(img.storage)}`}>
                           {markerLabel(img.storage)}
                         </span>
                         <span className="absolute right-1.5 top-1.5 rounded bg-background/80 px-1.5 py-0.5 text-[0.6875rem] tabular-nums">
                           {formatBytes(img.size)}
                         </span>
+                        {img.kind === "video" && (
+                          <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[0.6875rem] font-medium text-white">
+                            视频
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 p-2">
                         <Checkbox checked={isChecked} onCheckedChange={() => toggle(img.id, img)} />
                         <span className="truncate text-xs" title={img.filename}>{img.filename}</span>
                       </div>
-                    </label>
+                    </div>
                   );
                 })}
               </div>
@@ -298,6 +380,16 @@ export function MigrateClient({ markers, initialStatus }: { markers: MarkerOpt[]
           )}
         </CardContent>
       </Card>
+
+      {/* 灯箱查看/播放：当前页内左右切换，视频直接播放 */}
+      {preview !== null && (
+        <Lightbox
+          images={previewItems}
+          index={preview}
+          onClose={() => setPreview(null)}
+          onNavigate={setPreview}
+        />
+      )}
     </div>
   );
 }

@@ -28,6 +28,7 @@ export const GET = handle(async (req: Request) => {
     items: rows.map((r) => ({
       ...r,
       thumbUrl: `/api/images/${r.id}/thumb`,
+      rawUrl: `/api/images/${r.id}/raw`,
       kind: r.mimeType.startsWith("video/") ? "video" : "image",
     })),
     total,
