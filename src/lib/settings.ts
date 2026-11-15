@@ -19,6 +19,16 @@ export type R2SlotConfig = {
   hasSecret?: boolean;
 };
 
+// 单个 Redis 地址槽位（槽位列表存于 settings.redisSlots，JSON 数组）
+// id 用于「留空保存=保持原地址」按稳定标识回填，避免增删排序后地址串位
+export type RedisSlotConfig = {
+  id?: string;
+  url: string;
+  label?: string;
+  // 只读标记：服务端已存地址（地址本体永不下发浏览器）
+  hasUrl?: boolean;
+};
+
 export type SiteSettings = {
   siteName: string;
   allowRegister: boolean;
@@ -37,8 +47,12 @@ export type SiteSettings = {
   // 只读标记：服务端已存有 SMTP 授权码（本体永不下发浏览器）
   hasSmtpPass?: boolean;
   smtpFrom: string;
-  // Redis 连接地址（可选，用于限流等多实例共享场景）；留空回退环境变量 REDIS_URL，再无则降级进程内存
-  // 落库时加密存储（secret-box），下发浏览器时置空并标记 hasRedisUrl
+  // Redis 地址槽位（可多个）：主备切换按顺序取第一个可用；同时读写按 key 哈希分担
+  redisSlots: RedisSlotConfig[];
+  // 多地址工作模式：failover 主备切换 | balance 同时读写
+  redisMode: "failover" | "balance";
+  // Redis 连接地址（旧单地址字段，保留作为首槽镜像以兼容旧代码）
+  // 留空回退环境变量 REDIS_URL，再无则降级进程内存
   redisUrl: string;
   // Redis 启用开关：false 时不连 Redis（限流走进程内存），随时切换、无需重启
   redisEnabled: boolean;
@@ -61,6 +75,8 @@ const DEFAULTS: SiteSettings = {
   smtpUser: "",
   smtpPass: "",
   smtpFrom: "",
+  redisSlots: [],
+  redisMode: "failover",
   redisUrl: "",
   redisEnabled: false,
 };
@@ -83,6 +99,24 @@ function parseR2Slots(raw: string | undefined): R2SlotConfig[] | null {
       region: typeof v?.region === "string" ? v.region : "",
       label: typeof v?.label === "string" ? v.label : "",
     }));
+  } catch {
+    return null;
+  }
+}
+
+// 从 JSON 数组解析 Redis 槽位：url 落库时加密，读取时解密；缺失 id 用 s{i} 补齐
+function parseRedisSlots(raw: string | undefined): RedisSlotConfig[] | null {
+  if (!raw) return null;
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return null;
+    return arr
+      .map((v, i) => ({
+        id: typeof v?.id === "string" && v.id ? v.id : `s${i}`,
+        url: decryptSecret(typeof v?.url === "string" ? v.url : ""),
+        label: typeof v?.label === "string" ? v.label : "",
+      }))
+      .filter((s) => s.url);
   } catch {
     return null;
   }
@@ -111,6 +145,9 @@ export async function getSettings(): Promise<SiteSettings> {
           bucket: map.get("r2bBucket") ?? "",
         },
       ].filter((s) => s.accountId || s.bucket);
+    const legacyRedisUrl = decryptSecret(map.get("redisUrl"));
+    // 槽位列表优先；老实例只有单地址字段时自动合成为单槽位（不要求手工迁移）
+    const redisSlots = parseRedisSlots(map.get("redisSlots")) ?? (legacyRedisUrl ? [{ id: "legacy", url: legacyRedisUrl }] : []);
     const value: SiteSettings = {
       siteName: map.get("siteName") ?? DEFAULTS.siteName,
       allowRegister: (map.get("allowRegister") ?? "true") === "true",
@@ -124,7 +161,9 @@ export async function getSettings(): Promise<SiteSettings> {
       smtpUser: map.get("smtpUser") ?? "",
       smtpPass: map.get("smtpPass") ?? "",
       smtpFrom: map.get("smtpFrom") ?? "",
-      redisUrl: decryptSecret(map.get("redisUrl")),
+      redisSlots,
+      redisMode: map.get("redisMode") === "balance" ? "balance" : "failover",
+      redisUrl: redisSlots[0]?.url ?? "",
       redisEnabled: map.get("redisEnabled") === "true",
     };
     cache = { value, expiresAt: Date.now() + 60_000 };
@@ -137,7 +176,8 @@ export async function getSettings(): Promise<SiteSettings> {
 
 export async function saveSettings(patch: Partial<SiteSettings>) {
   // 剥离客户端只读标记（hasSecret / hasSmtpPass / hasRedisUrl），密钥本体在调用方（路由层）合并后传入
-  const { r2Slots, ...rest } = patch;
+  // redisSlots 单独序列化（对象数组直接 String() 会变成 [object Object]）
+  const { r2Slots, redisSlots, ...rest } = patch;
   const entries = Object.entries(rest)
     .filter(([k]) => k !== "hasSmtpPass" && k !== "hasRedisUrl")
     .map(([k, v]) => ({ key: k, value: String(v) }));
@@ -146,6 +186,20 @@ export async function saveSettings(patch: Partial<SiteSettings>) {
     if (e.key === "redisUrl" && e.value && !e.value.startsWith("enc:v1:")) {
       e.value = encryptSecret(e.value);
     }
+  }
+  if (redisSlots) {
+    const slots = redisSlots
+      .map((s) => ({
+        // 稳定 id：调用方不传时新生成，保证后续「留空保存」能按 id 回填
+        id: s.id || `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+        url: (s.url ?? "").trim(),
+        label: (s.label ?? "").trim(),
+      }))
+      .filter((s) => s.url)
+      .map((s) => ({ ...s, url: s.url.startsWith("enc:v1:") ? s.url : encryptSecret(s.url) }));
+    entries.push({ key: "redisSlots", value: JSON.stringify(slots) });
+    // 首槽写回旧单地址字段，保持向下兼容（旧版本代码仍能读到第一个地址）
+    entries.push({ key: "redisUrl", value: slots[0]?.url ?? "" });
   }
   if (r2Slots) {
     const slots = r2Slots.map(({ hasSecret: _omit, ...slot }) => slot);
@@ -182,6 +236,8 @@ export function sanitizeSettings(s: SiteSettings): SiteSettings {
     })),
     smtpPass: "",
     hasSmtpPass: !!s.smtpPass,
+    // 槽位地址永不下发浏览器，只回传 id / label / hasUrl（hasUrl 不参与保存过滤）
+    redisSlots: s.redisSlots.map((r) => ({ id: r.id, url: "", label: r.label ?? "", hasUrl: !!r.url })),
     redisUrl: "",
     hasRedisUrl: !!s.redisUrl,
   };

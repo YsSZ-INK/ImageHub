@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Unplug, ScrollText, ImageOff, Check } from "lucide-react";
+import { Loader2, Plus, Trash2, Unplug, ScrollText, ImageOff, Check, ArrowUp, ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +23,76 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+// ============ Redis 多地址：视图类型与状态文案 ============
+
+type RedisModeView = "failover" | "balance";
+
+type RedisSlotView = {
+  index: number;
+  label: string;
+  url: string;
+  status: "connected" | "standby" | "error" | "cooldown" | "idle";
+  error: string;
+  since: string;
+  latencyMs: number | null;
+};
+
+type RedisView = {
+  status: "disabled" | "connected" | "error";
+  url: string;
+  error: string;
+  since: string;
+  activeIndex: number;
+  mode: RedisModeView;
+  latencyMs: number | null;
+  slots: RedisSlotView[];
+  enabled: boolean;
+  configured?: { id?: string; label?: string; hasUrl?: boolean }[];
+};
+
+const REDIS_MAX_SLOTS = 5;
+
+// 延迟文案：null 不显示，0 表示不足 1ms
+function fmtLatency(ms: number | null | undefined): string | null {
+  if (ms == null) return null;
+  return ms <= 0 ? "<1 ms" : `${ms} ms`;
+}
+
+// 槽位状态胶囊
+function redisSlotMeta(status: RedisSlotView["status"], mode: RedisModeView): { text: string; cls: string } {
+  switch (status) {
+    case "connected":
+      return { text: mode === "failover" ? "当前生效" : "分担中", cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" };
+    case "standby":
+      return { text: "备用 · 已连接", cls: "bg-blue-500/15 text-blue-600 dark:text-blue-400" };
+    case "error":
+      return { text: "连接失败", cls: "bg-red-500/15 text-red-600 dark:text-red-400" };
+    case "cooldown":
+      return { text: "冷却中 · 30 秒后重试", cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400" };
+    default:
+      return { text: "未连接", cls: "bg-muted text-muted-foreground" };
+  }
+}
+
+// 左侧序号徽标：主备模式为 主 / 备 1 / 备 2，同时读写为 节点 1 / 节点 2
+function redisSlotBadge(i: number, mode: RedisModeView): string {
+  return mode === "failover" ? (i === 0 ? "主" : `备 ${i}`) : `节点 ${i + 1}`;
+}
+
+// 底部总状态
+function redisOverall(r: RedisView | null): { text: string; cls: string } | null {
+  if (!r) return null;
+  const gray = "bg-muted text-muted-foreground";
+  const green = "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400";
+  if (!r.enabled) return { text: "未启用 · 限流与缓存走内存", cls: gray };
+  if (r.status === "disabled" || r.slots.length === 0) return { text: "未配置地址 · 限流与缓存走内存", cls: gray };
+  if (r.status === "error") return { text: "全部地址连接失败 · 已降级内存", cls: "bg-red-500/15 text-red-600 dark:text-red-400" };
+  const healthy = r.slots.filter((s) => s.status === "connected" || s.status === "standby").length;
+  if (r.mode === "balance") return { text: `已连接 · ${healthy} 个实例同时分担读写`, cls: green };
+  const head = r.activeIndex > 0 ? `已连接（主库不可用，已切到备 ${r.activeIndex}）` : "已连接";
+  return { text: `${head} · 限流与直链缓存走 Redis`, cls: green };
+}
 
 // R2 实时同步面板：自带 10 秒轮询与手动触发，独立于主表单 state——
 // 状态刷新只重渲染本面板（几十行），不会让整页长表单跟着 re-render（滚动卡顿来源之一）
@@ -305,18 +375,18 @@ export function AdminSettingsClient() {
   }, []);
 
   // Redis 连接状态与测试（状态为服务端当前生效连接，保存配置后点测试刷新）
-  const [redis, setRedis] = useState<{ status: string; url: string; error: string; since: string; enabled: boolean } | null>(null);
+  const [redis, setRedis] = useState<RedisView | null>(null);
   const [redisTesting, setRedisTesting] = useState(false);
   const refreshRedis = useCallback(async () => {
     const json = await fetch("/api/admin/settings/redis").then((r) => r.json());
-    if (json.ok) setRedis(json.data);
+    if (json.ok) setRedis(json.data as RedisView);
   }, []);
   useEffect(() => {
     refreshRedis();
   }, [refreshRedis]);
 
   const [redisSaving, setRedisSaving] = useState(false);
-  // 独立保存 Redis 配置（开关 + 地址），不随整表单提交；保存后立即刷新连接状态
+  // 独立保存 Redis 配置（开关 + 模式 + 地址列表），不随整表单提交；保存后立即刷新连接状态
   async function saveRedis() {
     if (!form) return;
     setRedisSaving(true);
@@ -324,11 +394,15 @@ export function AdminSettingsClient() {
       const res = await fetch("/api/admin/settings/redis", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ redisEnabled: form.redisEnabled, redisUrl: form.redisUrl }),
+        body: JSON.stringify({
+          redisEnabled: form.redisEnabled,
+          redisMode: form.redisMode,
+          redisSlots: form.redisSlots.map((s) => ({ id: s.id, url: s.url, label: s.label ?? "" })),
+        }),
       });
       const json = await res.json();
       if (json.ok) {
-        toast.success("Redis 配置已保存，已生效");
+        toast.success(`Redis 配置已保存（${json.data.count} 个地址），已生效`);
         await refreshRedis();
       } else toast.error(json.error);
     } finally {
@@ -336,13 +410,14 @@ export function AdminSettingsClient() {
     }
   }
 
-  async function testRedis(useFormValue: boolean) {
+  // 统一处理三种测试：表单值（保存前）/ 某个已保存槽位 / 当前生效连接
+  async function testRedis(target: { url?: string; index?: number } = {}) {
     setRedisTesting(true);
     try {
       const res = await fetch("/api/admin/settings/redis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(useFormValue ? { url: form?.redisUrl ?? "" } : {}),
+        body: JSON.stringify(target),
       });
       const json = await res.json();
       if (json.ok) {
@@ -353,6 +428,32 @@ export function AdminSettingsClient() {
     } finally {
       setRedisTesting(false);
     }
+  }
+
+  // ---- Redis 地址槽位编辑 ----
+  function addRedisSlot() {
+    if (!form || form.redisSlots.length >= REDIS_MAX_SLOTS) return;
+    setForm({
+      ...form,
+      // 临时 id 落库后会作为稳定标识保留，保证「留空保存=保持原地址」按 id 回填
+      redisSlots: [...form.redisSlots, { id: `tmp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, url: "", label: "" }],
+    });
+  }
+  function updateRedisSlot(i: number, patch: { url?: string; label?: string }) {
+    if (!form) return;
+    setForm({ ...form, redisSlots: form.redisSlots.map((s, n) => (n === i ? { ...s, ...patch } : s)) });
+  }
+  function removeRedisSlot(i: number) {
+    if (!form) return;
+    setForm({ ...form, redisSlots: form.redisSlots.filter((_, n) => n !== i) });
+  }
+  function moveRedisSlot(i: number, dir: -1 | 1) {
+    if (!form) return;
+    const to = i + dir;
+    if (to < 0 || to >= form.redisSlots.length) return;
+    const next = [...form.redisSlots];
+    [next[i], next[to]] = [next[to], next[i]];
+    setForm({ ...form, redisSlots: next });
   }
 
   // R2 连接测试：用某个桶的当前表单配置真实读写一个探测对象
@@ -1089,7 +1190,7 @@ export function AdminSettingsClient() {
         <CardHeader>
           <CardTitle className="text-base">Redis 缓存（可选）</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4">
           <div className="flex items-center justify-between gap-4">
             <div>
               <Label htmlFor="redis-enabled">启用 Redis</Label>
@@ -1101,53 +1202,152 @@ export function AdminSettingsClient() {
               onCheckedChange={(v) => setForm({ ...form, redisEnabled: v })}
             />
           </div>
+
+          {/* 多地址工作模式 */}
           <div className="space-y-1.5">
-            <Label htmlFor="redis-url">Redis 连接地址</Label>
-            <PasswordInput
-              id="redis-url"
-              autoComplete="off"
-              placeholder={
-                form.hasRedisUrl
-                  ? "已保存（密码已加密存储，输入新地址可更换）"
-                  : "redis://default:密码@主机:6379（Docker 同栈填 redis://redis:6379）"
-              }
-              value={form.redisUrl}
-              onChange={(e) => setForm({ ...form, redisUrl: e.target.value })}
-            />
+            <Label>多地址工作模式</Label>
+            <div className="inline-flex rounded-lg bg-foreground/[0.06] p-1">
+              {(["failover", "balance"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={form.redisMode === m}
+                  onClick={() => setForm({ ...form, redisMode: m })}
+                  className={`rounded-md px-3 py-1 text-sm transition-colors ${
+                    form.redisMode === m
+                      ? "bg-foreground/[0.08] font-medium text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {m === "failover" ? "主备切换" : "同时读写"}
+                </button>
+              ))}
+            </div>
             <p className="text-xs text-muted-foreground">
-              {form.hasRedisUrl ? "已存地址不下发浏览器，留空保存即保持不变；" : ""}
-              留空回退环境变量 REDIS_URL；修改后点「保存配置」生效，无需重启站点。
+              主备：按列表顺序只连第一个可用地址，故障时自动切到下一个；同时读写：所有健康实例一起分担，同一 key 固定落同一台。
             </p>
           </div>
+
+          {form.redisMode === "balance" && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+              同时读写只适用于互不相通的独立实例。若填的是 Cluster 或主从复制组，请改选「主备切换」，否则同一份计数会被多台重复累加、缓存也会互相穿透。
+            </div>
+          )}
+
+          {/* 地址列表 */}
+          <div className="space-y-2">
+            {form.redisSlots.length === 0 && (
+              <p className="rounded-lg border border-dashed border-foreground/15 px-3 py-4 text-center text-xs text-muted-foreground">
+                还没有地址，点下方「添加地址」开始配置
+              </p>
+            )}
+            {form.redisSlots.map((slot, i) => {
+              const st = redis?.slots?.[i];
+              const meta = redisSlotMeta(st?.status ?? "idle", form.redisMode);
+              const msText = fmtLatency(st?.latencyMs);
+              return (
+                <div key={slot.id ?? `r${i}`} className="rounded-lg border border-foreground/10 p-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 rounded bg-foreground/[0.06] px-1.5 py-0.5 text-[0.6875rem] text-muted-foreground">
+                      {redisSlotBadge(i, form.redisMode)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <PasswordInput
+                        autoComplete="off"
+                        aria-label={`${redisSlotBadge(i, form.redisMode)}地址`}
+                        placeholder={
+                          slot.hasUrl && !slot.url
+                            ? "已保存（密码已加密存储，输入新地址可更换）"
+                            : "redis://default:密码@主机:6379"
+                        }
+                        value={slot.url}
+                        onChange={(e) => updateRedisSlot(i, { url: e.target.value })}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 shrink-0"
+                      aria-label="上移"
+                      disabled={i === 0}
+                      onClick={() => moveRedisSlot(i, -1)}
+                    >
+                      <ArrowUp className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 shrink-0"
+                      aria-label="下移"
+                      disabled={i === form.redisSlots.length - 1}
+                      onClick={() => moveRedisSlot(i, 1)}
+                    >
+                      <ArrowDown className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 shrink-0 text-destructive"
+                      aria-label="删除"
+                      onClick={() => removeRedisSlot(i)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span className={`rounded-full px-2 py-0.5 font-medium ${meta.cls}`}>{meta.text}</span>
+                    {msText && (
+                      <span className="tabular-nums text-muted-foreground" title="PING 往返耗时">
+                        {msText}
+                      </span>
+                    )}
+                    {st?.url && <span className="max-w-[45%] truncate text-muted-foreground">{st.url}</span>}
+                    {(st?.status === "error" || st?.status === "cooldown") && st?.error && (
+                      <span className="text-destructive">{st.error}</span>
+                    )}
+                    <button
+                      type="button"
+                      className="text-primary hover:underline disabled:opacity-50"
+                      disabled={redisTesting}
+                      onClick={() => testRedis(slot.url.trim() ? { url: slot.url.trim() } : { index: i })}
+                    >
+                      测试此地址
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            <div className="flex items-center gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={addRedisSlot} disabled={form.redisSlots.length >= REDIS_MAX_SLOTS}>
+                <Plus className="h-4 w-4" /> 添加地址
+              </Button>
+              <span className="text-xs text-muted-foreground">最多 {REDIS_MAX_SLOTS} 个地址</span>
+            </div>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            地址在服务端加密存储、保存后不再回显；留空保存＝保持原地址。未填地址时回退环境变量 REDIS_URL（支持逗号分隔多个）。修改后点「保存配置」生效，无需重启站点。
+          </p>
+
           <div className="flex flex-wrap items-center gap-2">
-            {redis && (
-              <span
-                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                  redis.status === "connected"
-                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                    : redis.status === "error"
-                      ? "bg-red-500/15 text-red-600 dark:text-red-400"
-                      : "bg-muted text-muted-foreground"
-                }`}
-              >
-                {redis.status === "connected"
-                  ? "已连接 · 限流与直链缓存走 Redis"
-                  : redis.status === "error"
-                    ? "连接失败 · 已降级内存"
-                    : redis.enabled
-                      ? "已启用 · 未连接"
-                      : "未启用 · 限流与缓存走内存"}
+            {(() => {
+              const overall = redisOverall(redis);
+              return overall ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${overall.cls}`}>{overall.text}</span> : null;
+            })()}
+            {redis?.latencyMs != null && (
+              <span className="text-xs tabular-nums text-muted-foreground" title="PING 往返耗时">
+                延迟 {fmtLatency(redis.latencyMs)}
               </span>
             )}
-            {redis?.url && <span className="truncate text-xs text-muted-foreground">{redis.url}</span>}
             <Button size="sm" onClick={saveRedis} disabled={redisSaving}>
               {redisSaving ? <Loader2 className="animate-spin" /> : null} 保存配置
             </Button>
-            <Button variant="outline" size="sm" onClick={() => testRedis(false)} disabled={redisTesting}>
-              {redisTesting ? <Loader2 className="animate-spin" /> : null} 测试当前配置
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => testRedis(true)} disabled={redisTesting || !form.redisUrl.trim()}>
-              {redisTesting ? <Loader2 className="animate-spin" /> : null} 测试上方地址
+            <Button variant="outline" size="sm" onClick={() => testRedis()} disabled={redisTesting}>
+              {redisTesting ? <Loader2 className="animate-spin" /> : null}
+              {form.redisMode === "failover" ? "测试当前生效连接" : "测试所有连接"}
             </Button>
           </div>
           {redis?.status === "error" && redis.error && <p className="text-xs text-destructive">{redis.error}</p>}

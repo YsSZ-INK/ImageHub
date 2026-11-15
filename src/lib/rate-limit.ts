@@ -14,10 +14,11 @@ export async function rateLimit(
   limit: number,
   windowMs: number
 ): Promise<{ success: boolean; retryAfter: number }> {
-  const r = await getRedis();
+  // 按 key 选实例：同一限流键必须固定落同一台，否则计数会被节点数放大
+  const k = `rl:${key}`;
+  const r = await getRedis(k);
   if (r) {
     try {
-      const k = `rl:${key}`;
       const n = await r.incr(k);
       if (n === 1) await r.pexpire(k, windowMs);
       let ttl = await r.pttl(k);

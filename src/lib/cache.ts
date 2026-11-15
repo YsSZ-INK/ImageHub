@@ -1,4 +1,4 @@
-import { getRedis } from "@/lib/redis";
+import { getRedis, getRedisNodes } from "@/lib/redis";
 
 /**
  * 通用 cache-aside 缓存助手（可选组件，全程可降级）：
@@ -38,7 +38,8 @@ function memSet(key: string, value: string, ttlMs: number) {
 // 读缓存：命中返回反序列化结果；未命中跑 loader 并写缓存（loader 返回 undefined 则跳过缓存）
 export async function cachedJson<T>(key: string, ttlMs: number, loader: () => Promise<T | undefined>): Promise<T | undefined> {
   let raw: string | undefined;
-  const r = await getRedis();
+  // 带 key 取客户端：同时读写模式下要读自己写的那台，否则缓存命中率会被节点数摊薄
+  const r = await getRedis(key);
   if (r) {
     try {
       raw = (await r.get(key)) ?? undefined;
@@ -69,16 +70,19 @@ export async function cachedJson<T>(key: string, ttlMs: number, loader: () => Pr
   return value;
 }
 
-// 主动失效（Redis DEL + 内存清除）：图片行 / 授权关系等变更入口调用
+// 主动失效（全节点 DEL + 内存清除）：图片行 / 授权关系等变更入口调用
+// 同时读写模式下 key 可能落在任意节点，只删一台会留下脏缓存；DEL 不存在的 key 无副作用
 export async function invalidateJson(...keys: string[]) {
   if (keys.length === 0) return;
-  const r = await getRedis();
-  if (r) {
-    try {
-      await r.del(...keys);
-    } catch {
-      // 忽略，TTL 兜底
-    }
+  const nodes = getRedisNodes();
+  if (nodes.length) {
+    await Promise.all(
+      nodes.map((r) =>
+        r.del(...keys).catch(() => {
+          // 单个节点失败忽略，TTL 兜底
+        })
+      )
+    );
   }
   for (const k of keys) mem.delete(k);
 }
